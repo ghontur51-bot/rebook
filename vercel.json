@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/superadmin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/shop/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/pay/:path*",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/billing",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

@@ -1,0 +1,733 @@
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const QRCode = require('qrcode');
+const path = require('path');
+
+try {
+  if (typeof process.loadEnvFile === 'function') process.loadEnvFile();
+} catch (_) {}
+
+const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { if (req.originalUrl === '/api/razorpay/webhook') req.rawBody = Buffer.from(buf); } }));
+
+const PORT = Number(process.env.REBOOK_API_PORT || process.env.API_PORT || 5000);
+const APP_BASE_URL = (process.env.APP_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')).replace(/\/$/, '');
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '';
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || '';
+const MASTER_ENCRYPTION_KEY = process.env.MASTER_ENCRYPTION_KEY || '';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+const CRON_SECRET = process.env.CRON_SECRET || '';
+
+const CENTRAL_SERVICE_ACCOUNT_JSON = process.env.CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON || '';
+const CENTRAL_PROJECT_ID = process.env.CENTRAL_FIREBASE_PROJECT_ID || '';
+const CENTRAL_CLIENT_EMAIL = process.env.CENTRAL_FIREBASE_CLIENT_EMAIL || '';
+const CENTRAL_PRIVATE_KEY = process.env.CENTRAL_FIREBASE_PRIVATE_KEY || '';
+
+const SHOP_COLLECTIONS = [
+  'customers', 'bookings', 'automations', 'campaigns', 'messages', 'staff', 'automationRuns', 'visits'
+];
+
+const tokenCache = new Map();
+const serviceAppCache = new Map();
+
+function fail(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+}
+
+function jsonOrUndefined(raw, label) {
+  if (!raw) return undefined;
+  try { return JSON.parse(raw); } catch { fail(500, `${label} is not valid JSON.`); }
+}
+
+function getCentralServiceAccount() {
+  const fromJson = jsonOrUndefined(CENTRAL_SERVICE_ACCOUNT_JSON, 'CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON');
+  const projectId = fromJson?.project_id || CENTRAL_PROJECT_ID;
+  const clientEmail = fromJson?.client_email || CENTRAL_CLIENT_EMAIL;
+  const privateKey = (fromJson?.private_key || CENTRAL_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  if (!projectId || !clientEmail || !privateKey) {
+    fail(500, 'Central Firebase service account is not configured.');
+  }
+  return { project_id: projectId, client_email: clientEmail, private_key: privateKey };
+}
+
+function normalizeFirebasePrivateKey(rawKey) {
+  let key = String(rawKey || '').replace(/^\uFEFF/, '').trim();
+
+  // Firebase service-account JSON normally stores newlines as \\n.
+  // Convert escaped line breaks and Windows line endings into a canonical PEM.
+  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // Be tolerant if someone pasted an extra pair of quotes around the PEM.
+  if ((key.startsWith('\"') && key.endsWith('\"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+
+  if (!key.includes('-----BEGIN ') || !key.includes('-----END ')) {
+    fail(400, 'Firebase service account private_key is not a valid PEM key. Download a fresh service-account JSON key from Firebase and paste the complete JSON.');
+  }
+
+  try {
+    const keyObject = crypto.createPrivateKey({ key, format: 'pem' });
+    return keyObject.export({ format: 'pem', type: 'pkcs8' }).toString();
+  } catch (_) {
+    fail(400, 'Firebase service account private_key could not be parsed. Use the complete private_key from a freshly downloaded Firebase service-account JSON file.');
+  }
+}
+
+function sha256(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
+
+function getEncryptionKey() {
+  if (!/^[0-9a-fA-F]{64}$/.test(MASTER_ENCRYPTION_KEY)) {
+    fail(500, 'MASTER_ENCRYPTION_KEY must be a 64-character hex string.');
+  }
+  return Buffer.from(MASTER_ENCRYPTION_KEY, 'hex');
+}
+
+function encryptSecret(value) {
+  const iv = crypto.randomBytes(12);
+  const key = getEncryptionKey();
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { v: 1, alg: 'aes-256-gcm', iv: iv.toString('base64url'), tag: tag.toString('base64url'), data: ciphertext.toString('base64url') };
+}
+
+function decryptSecret(payload) {
+  const key = getEncryptionKey();
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(payload.iv, 'base64url'));
+  decipher.setAuthTag(Buffer.from(payload.tag, 'base64url'));
+  return Buffer.concat([decipher.update(Buffer.from(payload.data, 'base64url')), decipher.final()]).toString('utf8');
+}
+
+function baseUrlFromReq(req) {
+  if (APP_BASE_URL) return APP_BASE_URL.replace(/\/$/, '');
+  if (!req) {
+    if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+    return 'http://localhost:5000';
+  }
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = forwardedProto || req.protocol || 'http';
+  const host = req.get('host');
+  return `${proto}://${host}`;
+}
+
+function signAdminToken(payload) {
+  if (!ADMIN_SESSION_SECRET) fail(500, 'ADMIN_SESSION_SECRET is not configured.');
+  const body = Buffer.from(JSON.stringify({ ...payload, iat: Date.now() })).toString('base64url');
+  const signature = crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${signature}`;
+}
+
+function verifyAdminToken(token) {
+  if (!token || !ADMIN_SESSION_SECRET) return false;
+  const parts = String(token).split('.');
+  if (parts.length !== 2) return false;
+  const expected = crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(parts[0]).digest('base64url');
+  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts[1]))) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    return payload.role === 'superadmin' && Date.now() - Number(payload.iat || 0) < 8 * 60 * 60 * 1000;
+  } catch { return false; }
+}
+
+function requireAdmin(req, res, next) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!verifyAdminToken(token)) return res.status(401).json({ error: 'Unauthorized.' });
+  next();
+}
+
+async function googleAccessToken(serviceAccount) {
+  const cacheKey = serviceAccount.client_email;
+  const cached = tokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const claim = Buffer.from(JSON.stringify({
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/cloud-platform',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  })).toString('base64url');
+  const unsigned = `${header}.${claim}`;
+  const privateKey = normalizeFirebasePrivateKey(serviceAccount.private_key);
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(unsigned);
+  signer.end();
+  const signature = signer.sign(privateKey).toString('base64url');
+  const assertion = `${unsigned}.${signature}`;
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }).toString(),
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      detail = [parsed.error, parsed.error_description].filter(Boolean).join(': ') || raw;
+    } catch (_) {}
+    fail(502, `Google authentication failed (${response.status}): ${detail}`);
+  }
+  const data = await response.json();
+  tokenCache.set(cacheKey, { token: data.access_token, expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000 });
+  return data.access_token;
+}
+
+function fsValue(value) {
+  if (value === null || value === undefined) return { nullValue: null };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) return { integerValue: String(value) };
+    return { doubleValue: value };
+  }
+  if (value instanceof Date) return { timestampValue: value.toISOString() };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(fsValue) } };
+  if (typeof value === 'object') return { mapValue: { fields: Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fsValue(v)])) } };
+  return { stringValue: String(value) };
+}
+
+function fromFsValue(v) {
+  if (!v) return null;
+  if ('stringValue' in v) return v.stringValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return Number(v.doubleValue);
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('nullValue' in v) return null;
+  if ('timestampValue' in v) return v.timestampValue;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromFsValue);
+  if ('mapValue' in v) return Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, fromFsValue(x)]));
+  return null;
+}
+
+function firestoreBase(projectId) {
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents`;
+}
+
+async function firestoreFetch(serviceAccount, method, url, body) {
+  const token = await googleAccessToken(serviceAccount);
+  const response = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok) {
+    const message = data?.error?.message || `Firestore request failed (${response.status}).`;
+    fail(response.status >= 500 ? 502 : response.status, message);
+  }
+  return data;
+}
+
+async function listDocuments(serviceAccount, projectId, collection) {
+  const all = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ pageSize: '1000' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const data = await firestoreFetch(serviceAccount, 'GET', `${firestoreBase(projectId)}/${encodeURIComponent(collection)}?${query.toString()}`);
+    for (const doc of data.documents || []) {
+      const fields = Object.fromEntries(Object.entries(doc.fields || {}).map(([k, v]) => [k, fromFsValue(v)]));
+      const id = doc.name.split('/').pop();
+      all.push({ ...fields, __docId: id });
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return all;
+}
+
+function firestoreDocumentPath(projectId, collection, id) {
+  return `projects/${encodeURIComponent(projectId)}/databases/(default)/documents/${encodeURIComponent(collection)}/${encodeURIComponent(String(id))}`;
+}
+
+function docName(projectId, collection, id) {
+  return `${firestoreBase(projectId)}/${encodeURIComponent(collection)}/${encodeURIComponent(String(id))}`;
+}
+
+async function commitWrites(serviceAccount, projectId, writes) {
+  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents:commit`;
+  for (let i = 0; i < writes.length; i += 450) {
+    const chunk = writes.slice(i, i + 450);
+    await firestoreFetch(serviceAccount, 'POST', url, { writes: chunk });
+  }
+}
+
+function makeUpdateWrite(projectId, collection, id, data) {
+  const safe = { ...data };
+  delete safe.__docId;
+  return { update: { name: firestoreDocumentPath(projectId, collection, id), fields: Object.fromEntries(Object.entries(safe).map(([k, v]) => [k, fsValue(v)])) } };
+}
+
+function makeDeleteWrite(projectId, collection, id) {
+  return { delete: firestoreDocumentPath(projectId, collection, id) };
+}
+
+async function ensureCentralShopAccess() {
+  const central = getCentralServiceAccount();
+  return { serviceAccount: central, projectId: central.project_id };
+}
+
+async function getCentralDoc(collection, id) {
+  const { serviceAccount, projectId } = await ensureCentralShopAccess();
+  try {
+    const data = await firestoreFetch(serviceAccount, 'GET', docName(projectId, collection, id));
+    return Object.fromEntries(Object.entries(data.fields || {}).map(([k, v]) => [k, fromFsValue(v)]));
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+}
+
+async function setCentralDoc(collection, id, data) {
+  const { serviceAccount, projectId } = await ensureCentralShopAccess();
+  await commitWrites(serviceAccount, projectId, [makeUpdateWrite(projectId, collection, id, data)]);
+}
+
+async function listCentral(collection) {
+  const { serviceAccount, projectId } = await ensureCentralShopAccess();
+  return listDocuments(serviceAccount, projectId, collection);
+}
+
+async function getShopRecord(shopId) {
+  return getCentralDoc('shops', shopId);
+}
+
+async function getShopFirebase(shop) {
+  if (!shop?.firebaseServiceAccountEncrypted) fail(500, 'Shop Firebase credentials are missing.');
+  const raw = decryptSecret(shop.firebaseServiceAccountEncrypted);
+  const serviceAccount = JSON.parse(raw);
+  if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) fail(500, 'Stored shop Firebase service account is invalid.');
+  return { serviceAccount, projectId: serviceAccount.project_id };
+}
+
+async function shopSnapshot(shop) {
+  const { serviceAccount, projectId } = await getShopFirebase(shop);
+  const [customers, bookings, automations, campaigns, messages, staff, automationRuns, visits, salonDocs, notificationDocs] = await Promise.all([
+    listDocuments(serviceAccount, projectId, 'customers'),
+    listDocuments(serviceAccount, projectId, 'bookings'),
+    listDocuments(serviceAccount, projectId, 'automations'),
+    listDocuments(serviceAccount, projectId, 'campaigns'),
+    listDocuments(serviceAccount, projectId, 'messages'),
+    listDocuments(serviceAccount, projectId, 'staff'),
+    listDocuments(serviceAccount, projectId, 'automationRuns'),
+    listDocuments(serviceAccount, projectId, 'visits'),
+    listDocuments(serviceAccount, projectId, 'salon'),
+    listDocuments(serviceAccount, projectId, 'notifications'),
+  ]);
+  const strip = rows => rows.map(({ __docId, ...x }) => x);
+  const visitHistory = {};
+  for (const row of visits) {
+    const id = row.__docId;
+    visitHistory[id] = row.records || [];
+  }
+  return {
+    customers: strip(customers),
+    bookings: strip(bookings),
+    automations: strip(automations),
+    campaigns: strip(campaigns),
+    messages: strip(messages),
+    staff: strip(staff),
+    automationRuns: strip(automationRuns),
+    visitHistory,
+    salon: salonDocs[0] ? (() => { const { __docId, ...x } = salonDocs[0]; return x; })() : null,
+    notifications: notificationDocs[0] ? (() => { const { __docId, ...x } = notificationDocs[0]; return x; })() : null,
+  };
+}
+
+function hashEqual(a, b) {
+  const ah = Buffer.from(sha256(a), 'hex');
+  const bh = Buffer.from(sha256(b), 'hex');
+  return ah.length === bh.length && crypto.timingSafeEqual(ah, bh);
+}
+
+async function requireShopAccess(req, res, next) {
+  try {
+    const shopId = req.params.shopId;
+    const token = String(req.headers['x-shop-access-token'] || '');
+    const shop = await getShopRecord(shopId);
+    if (!shop || shop.deletedAt) return res.status(404).json({ error: 'Shop not found.' });
+    if (!token || !shop.accessTokenHash || !hashEqual(token, shop.accessTokenHash)) return res.status(401).json({ error: 'Invalid shop access token.' });
+    await ensureBillingState(shopId);
+    const refreshed = await getShopRecord(shopId);
+    if (!refreshed || refreshed.status !== 'active') return res.status(423).json({ error: 'Shop access is frozen.', shop: publicShop(refreshed) });
+    req.shop = refreshed;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function publicShop(shop) {
+  if (!shop) return null;
+  return {
+    shopId: shop.shopId,
+    shopName: shop.shopName,
+    ownerName: shop.ownerName,
+    ownerEmail: shop.ownerEmail,
+    address: shop.address,
+    phone: shop.phone,
+    price: Number(shop.price || 0),
+    currency: shop.currency || 'INR',
+    status: shop.status || 'pending',
+    billingStart: shop.billingStart || null,
+    billingEnd: shop.billingEnd || null,
+    renewalCycleId: shop.currentCycleId || null,
+    renewalQrDataUrl: shop.renewalQrDataUrl || null,
+    renewalUrl: shop.renewalUrl || null,
+  };
+}
+
+async function createQrForCycle(req, shopId, cycleId) {
+  const url = `${baseUrlFromReq(req)}/pay/${encodeURIComponent(shopId)}/${encodeURIComponent(cycleId)}`;
+  return { url, qrDataUrl: await QRCode.toDataURL(url, { margin: 1, width: 320 }) };
+}
+
+async function getBillingCycle(cycleId) { return getCentralDoc('billingCycles', cycleId); }
+async function setBillingCycle(cycleId, data) { return setCentralDoc('billingCycles', cycleId, data); }
+
+function addDays(date, days) { return new Date(date.getTime() + days * 86400000); }
+
+async function ensureBillingState(shopId, req) {
+  const shop = await getShopRecord(shopId);
+  if (!shop || shop.deletedAt) return null;
+  if (shop.status === 'active' && shop.billingEnd && Date.now() >= new Date(shop.billingEnd).getTime()) {
+    const existingCycle = shop.currentCycleId ? await getBillingCycle(shop.currentCycleId) : null;
+    if (!existingCycle || existingCycle.status === 'paid') {
+      const cycleId = `cycle_${shopId}_${Date.now()}`;
+      const qr = await createQrForCycle(req, shopId, cycleId);
+      const cycle = {
+        cycleId,
+        shopId,
+        amount: Number(shop.price || 0),
+        currency: shop.currency || 'INR',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        dueAt: new Date().toISOString(),
+        qrUrl: qr.url,
+        qrDataUrl: qr.qrDataUrl,
+        razorpayOrderId: null,
+        razorpayPaymentId: null,
+      };
+      await setBillingCycle(cycleId, cycle);
+      await setCentralDoc('shops', shopId, {
+        ...shop,
+        status: 'frozen',
+        currentCycleId: cycleId,
+        renewalQrDataUrl: qr.qrDataUrl,
+        renewalUrl: qr.url,
+        updatedAt: new Date().toISOString(),
+      });
+      return cycle;
+    }
+  }
+  return shop.currentCycleId ? getBillingCycle(shop.currentCycleId) : null;
+}
+
+async function processExpiries() {
+  const shops = await listCentral('shops');
+  const results = [];
+  for (const shop of shops) {
+    if (!shop.shopId || shop.deletedAt) continue;
+    const before = shop.status;
+    await ensureBillingState(shop.shopId);
+    const after = await getShopRecord(shop.shopId);
+    if (before !== after?.status || (after?.renewalQrDataUrl && before === 'active')) results.push(after.shopId);
+  }
+  return results;
+}
+
+async function razorpayFetch(method, endpoint, body) {
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) fail(500, 'Razorpay credentials are not configured.');
+  const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+  const response = await fetch(`https://api.razorpay.com/v1${endpoint}`, {
+    method,
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let data = {}; try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok) fail(response.status >= 500 ? 502 : response.status, data?.error?.description || `Razorpay request failed (${response.status}).`);
+  return data;
+}
+
+async function createRazorpayOrderForCycle(cycleId, shop) {
+  const cycle = await getBillingCycle(cycleId);
+  if (!cycle || cycle.shopId !== shop.shopId) fail(404, 'Billing cycle not found.');
+  if (cycle.status === 'paid') return cycle;
+  if (cycle.razorpayOrderId) return cycle;
+  const order = await razorpayFetch('POST', '/orders', {
+    amount: Math.round(Number(cycle.amount || shop.price || 0) * 100),
+    currency: cycle.currency || 'INR',
+    receipt: cycleId,
+    notes: { shopId: shop.shopId, cycleId },
+  });
+  const updated = { ...cycle, razorpayOrderId: order.id, razorpayKeyId: RAZORPAY_KEY_ID };
+  await setBillingCycle(cycleId, updated);
+  return updated;
+}
+
+async function activatePaidCycle(cycle, payment) {
+  const shop = await getShopRecord(cycle.shopId);
+  if (!shop || shop.deletedAt) return;
+  if (cycle.status === 'paid') return;
+  const paidAt = new Date().toISOString();
+  const start = paidAt;
+  const end = addDays(new Date(paidAt), 30).toISOString();
+  const updatedCycle = { ...cycle, status: 'paid', paidAt, razorpayPaymentId: payment.paymentId, razorpayOrderId: payment.orderId };
+  await setBillingCycle(cycle.cycleId, updatedCycle);
+  await setCentralDoc('shops', shop.shopId, {
+    ...shop,
+    status: 'active',
+    billingStart: start,
+    billingEnd: end,
+    currentCycleId: cycle.cycleId,
+    renewalQrDataUrl: null,
+    renewalUrl: null,
+    updatedAt: paidAt,
+  });
+}
+
+async function processWebhook(payload, signature) {
+  if (!RAZORPAY_WEBHOOK_SECRET) fail(500, 'RAZORPAY_WEBHOOK_SECRET is not configured.');
+  const expected = crypto.createHmac('sha256', RAZORPAY_WEBHOOK_SECRET).update(payload).digest('hex');
+  if (!hashEqual(expected, signature || '')) fail(401, 'Invalid Razorpay webhook signature.');
+  const body = JSON.parse(payload);
+  const event = body.event;
+  const entity = body.payload?.payment?.entity;
+  if (event === 'payment.captured' && entity) {
+    const orderId = entity.order_id;
+    const paymentId = entity.id;
+    const cycles = await listCentral('billingCycles');
+    const cycle = cycles.find(c => c.razorpayOrderId === orderId);
+    if (cycle) await activatePaidCycle(cycle, { paymentId, orderId });
+  }
+}
+
+// --- Core routes ---
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'rebook-api' }));
+
+app.post('/api/admin/login', (req, res) => {
+  if (!SUPER_ADMIN_PASSWORD) return res.status(500).json({ error: 'SUPER_ADMIN_PASSWORD is not configured.' });
+  const password = String(req.body?.password || '');
+  if (!password || !hashEqual(password, SUPER_ADMIN_PASSWORD)) return res.status(401).json({ error: 'Invalid password.' });
+  res.json({ success: true, token: signAdminToken({ role: 'superadmin' }) });
+});
+
+app.get('/api/admin/shops', requireAdmin, async (_req, res, next) => {
+  try {
+    const shops = await listCentral('shops');
+    res.json({ shops: shops.map(publicShop) });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const required = ['shopName', 'ownerName', 'ownerEmail', 'price', 'firebaseServiceAccountJson'];
+    for (const key of required) if (!body[key]) return res.status(400).json({ error: `${key} is required.` });
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(body.firebaseServiceAccountJson);
+    } catch (_) {
+      return res.status(400).json({ error: 'Firebase service account JSON is not valid JSON. Paste the original downloaded service-account JSON file contents exactly.' });
+    }
+    if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) return res.status(400).json({ error: 'Firebase service account JSON is missing project_id/client_email/private_key.' });
+    serviceAccount.private_key = normalizeFirebasePrivateKey(serviceAccount.private_key);
+    const shopId = `shop_${crypto.randomBytes(8).toString('hex')}`;
+    const accessToken = crypto.randomBytes(24).toString('base64url');
+    const cycleId = `cycle_${shopId}_initial`;
+    const publicConfig = body.firebaseWebConfig || null;
+    const tempShop = {
+      shopId,
+      shopName: String(body.shopName).trim(),
+      ownerName: String(body.ownerName).trim(),
+      ownerEmail: String(body.ownerEmail).trim(),
+      phone: String(body.phone || '').trim(),
+      address: String(body.address || '').trim(),
+      price: Number(body.price),
+      currency: String(body.currency || 'INR'),
+      status: 'pending',
+      billingStart: null,
+      billingEnd: null,
+      currentCycleId: cycleId,
+      renewalQrDataUrl: null,
+      renewalUrl: null,
+      firebaseProjectId: serviceAccount.project_id,
+      firebaseWebConfig: publicConfig,
+      firebaseServiceAccountEncrypted: encryptSecret(JSON.stringify(serviceAccount)),
+      accessTokenHash: sha256(accessToken),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    // Verify we can authenticate to the supplied Firebase before accepting the shop.
+    await googleAccessToken(serviceAccount);
+    await listDocuments(serviceAccount, serviceAccount.project_id, 'rebook_connection_test').catch((error) => {
+      // A missing collection is fine; the Firestore API returns a valid empty response when accessible.
+      if (error.status !== 404) throw error;
+    });
+    const initialStaff = Array.isArray(body.initialStaff) ? body.initialStaff : [];
+    const staffWrites = initialStaff
+      .filter((staff) => staff && String(staff.name || '').trim())
+      .map((staff, index) => ({
+        __docId: `staff_${crypto.randomBytes(6).toString('hex')}`,
+        id: Date.now() + index,
+        name: String(staff.name).trim(),
+        phone: String(staff.phone || '').trim(),
+        template: String(staff.template || '').trim(),
+        active: staff.active !== false,
+        workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        startTime: '09:00',
+        endTime: '18:00',
+      }));
+    if (staffWrites.length) {
+      await commitWrites(serviceAccount, serviceAccount.project_id, staffWrites.map((item) => makeUpdateWrite(serviceAccount.project_id, 'staff', item.__docId, item)));
+    }
+    const qr = await createQrForCycle(req, shopId, cycleId);
+    await setCentralDoc('shops', shopId, { ...tempShop, renewalQrDataUrl: qr.qrDataUrl, renewalUrl: qr.url });
+    await setBillingCycle(cycleId, {
+      cycleId,
+      shopId,
+      amount: Number(body.price),
+      currency: String(body.currency || 'INR'),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      dueAt: new Date().toISOString(),
+      qrUrl: qr.url,
+      qrDataUrl: qr.qrDataUrl,
+      razorpayOrderId: null,
+      razorpayPaymentId: null,
+    });
+    res.json({ success: true, shop: publicShop({ ...tempShop, renewalQrDataUrl: qr.qrDataUrl, renewalUrl: qr.url }), accessToken, appUrl: `${baseUrlFromReq(req)}/shop/${shopId}/${accessToken}` });
+  } catch (e) { next(e); }
+});
+
+// Correct delete route: soft-delete central access; never touch the shop Firebase data.
+app.delete('/api/admin/shops/:shopId', requireAdmin, async (req, res, next) => {
+  try {
+    const shop = await getShopRecord(req.params.shopId);
+    if (!shop) return res.status(404).json({ error: 'Shop not found.' });
+    await setCentralDoc('shops', shop.shopId, { ...shop, status: 'deleted', deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/public/shops/:shopId', async (req, res, next) => {
+  try {
+    const shop = await ensureBillingState(req.params.shopId, req);
+    if (!shop) return res.status(404).json({ error: 'Shop not found.' });
+    res.json({ shop: publicShop(await getShopRecord(req.params.shopId)) });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/public/billing/:shopId/:cycleId', async (req, res, next) => {
+  try {
+    const shop = await getShopRecord(req.params.shopId);
+    const cycle = await getBillingCycle(req.params.cycleId);
+    if (!shop || !cycle || cycle.shopId !== shop.shopId) return res.status(404).json({ error: 'Billing cycle not found.' });
+    res.json({ shop: publicShop(shop), cycle: { cycleId: cycle.cycleId, amount: cycle.amount, currency: cycle.currency, status: cycle.status, qrDataUrl: cycle.qrDataUrl, qrUrl: cycle.qrUrl, razorpayOrderId: cycle.razorpayOrderId, razorpayKeyId: RAZORPAY_KEY_ID } });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/public/billing/:shopId/:cycleId/order', async (req, res, next) => {
+  try {
+    const shop = await ensureBillingState(req.params.shopId, req);
+    if (!shop || shop.deletedAt) return res.status(404).json({ error: 'Shop not found.' });
+    const cycle = await getBillingCycle(req.params.cycleId);
+    if (!cycle || cycle.shopId !== shop.shopId) return res.status(404).json({ error: 'Billing cycle not found.' });
+    if (cycle.status === 'paid') return res.status(409).json({ error: 'This billing cycle is already paid.' });
+    const updated = await createRazorpayOrderForCycle(cycle.cycleId, shop);
+    res.json({ success: true, keyId: RAZORPAY_KEY_ID, orderId: updated.razorpayOrderId, amount: Number(updated.amount), currency: updated.currency });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/public/billing/verify', async (req, res, next) => {
+  try {
+    const { shopId, cycleId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    const cycle = await getBillingCycle(cycleId);
+    if (!cycle || cycle.shopId !== shopId) return res.status(404).json({ error: 'Billing cycle not found.' });
+    const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+    if (!hashEqual(expected, razorpay_signature || '')) return res.status(400).json({ error: 'Payment signature verification failed.' });
+    if (cycle.razorpayOrderId !== razorpay_order_id) return res.status(400).json({ error: 'Payment order mismatch.' });
+    const payment = await razorpayFetch('GET', `/payments/${encodeURIComponent(razorpay_payment_id)}`);
+    if (payment.order_id !== razorpay_order_id || payment.currency !== cycle.currency || Number(payment.amount) !== Math.round(Number(cycle.amount) * 100) || payment.status !== 'captured') {
+      return res.status(400).json({ error: 'Payment details do not match the expected captured billing payment.' });
+    }
+    await activatePaidCycle(cycle, { paymentId: razorpay_payment_id, orderId: razorpay_order_id });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/razorpay/webhook', async (req, res, next) => {
+  try {
+    const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+    await processWebhook(raw, req.headers['x-razorpay-signature']);
+    res.json({ received: true });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/shop/:shopId/state', requireShopAccess, async (req, res, next) => {
+  try { res.json(await shopSnapshot(req.shop)); } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/sync', requireShopAccess, async (req, res, next) => {
+  try {
+    const { collection, upserts = [], deletes = [] } = req.body || {};
+    const allowed = [...SHOP_COLLECTIONS, 'salon', 'notifications'];
+    if (!allowed.includes(collection)) return res.status(400).json({ error: 'Unsupported collection.' });
+    const { serviceAccount, projectId } = await getShopFirebase(req.shop);
+    const writes = [];
+    for (const item of upserts) {
+      const id = item?.__docId ?? item?.id ?? item?.key ?? 'current';
+      writes.push(makeUpdateWrite(projectId, collection, id, item));
+    }
+    for (const id of deletes) writes.push(makeDeleteWrite(projectId, collection, id));
+    if (writes.length) await commitWrites(serviceAccount, projectId, writes);
+    res.json({ success: true, writes: writes.length });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/reset', requireShopAccess, async (req, res, next) => {
+  try {
+    if (process.env.ALLOW_CLOUD_RESET !== 'true') return res.status(403).json({ error: 'Cloud reset is disabled.' });
+    const { serviceAccount, projectId } = await getShopFirebase(req.shop);
+    for (const collection of [...SHOP_COLLECTIONS, 'salon', 'notifications']) {
+      const docs = await listDocuments(serviceAccount, projectId, collection);
+      if (!docs.length) continue;
+      await commitWrites(serviceAccount, projectId, docs.map(d => makeDeleteWrite(projectId, collection, d.__docId)));
+    }
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+app.get('/api/cron/billing', async (req, res, next) => {
+  try {
+    const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!CRON_SECRET || !hashEqual(supplied, CRON_SECRET)) return res.status(401).json({ error: 'Unauthorized.' });
+    const expired = await processExpiries();
+    res.json({ success: true, expired });
+  } catch (e) { next(e); }
+});
+
+app.use((error, _req, res, _next) => {
+  console.error('ReBook API error:', error.message);
+  res.status(error.status || 500).json({ error: error.message || 'Internal server error.' });
+});
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`ReBook API running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

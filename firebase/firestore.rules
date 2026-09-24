@@ -1,0 +1,11 @@
+// ReBook uses the server-side Firestore REST/Admin gateway for real shop data.
+// Keep direct browser access disabled unless you intentionally add a separate
+// Firebase Authentication + client SDK flow later.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

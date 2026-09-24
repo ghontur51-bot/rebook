@@ -1,0 +1,10 @@
+{
+  "description": "ReBook empowers small salons to automatically re-engage inactive customers, streamline bookings, and boost repeat business through intuitive automation and analytics.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
