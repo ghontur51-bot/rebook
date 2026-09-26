@@ -18,19 +18,44 @@ export interface BlastRecipient { id: number | string; name: string; phone: stri
 export interface BlastResultItem { id: number | string; name: string; phone: string; status: 'pending' | 'sending' | 'sent' | 'failed'; error?: string | null; }
 export interface BlastProgressResponse { isRunning: boolean; campaignName: string; total: number; sentCount: number; failedCount: number; currentIndex: number; results: BlastResultItem[]; cancelled: boolean; }
 
-function getShopContext(): { shopId: string; accessToken: string } | null {
+function getContext(): { mode: 'shop' | 'demo'; shopId?: string; accessToken?: string } | null {
   const parts = window.location.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  if (parts[0] === 'demo') return { mode: 'demo' };
   if (parts[0] !== 'shop' || !parts[1] || !parts[2]) return null;
-  return { shopId: decodeURIComponent(parts[1]), accessToken: decodeURIComponent(parts[2]) };
+  return { mode: 'shop', shopId: decodeURIComponent(parts[1]), accessToken: decodeURIComponent(parts[2]) };
+}
+
+export function getDemoWhatsAppPin(): string {
+  return sessionStorage.getItem('rebook_demo_whatsapp_pin') || '';
+}
+
+export function setDemoWhatsAppPin(pin: string) {
+  sessionStorage.setItem('rebook_demo_whatsapp_pin', pin);
+}
+
+export function clearDemoWhatsAppPin() {
+  sessionStorage.removeItem('rebook_demo_whatsapp_pin');
 }
 
 async function bridgeRequest<T>(suffix: string, init: RequestInit = {}): Promise<T> {
-  const context = getShopContext();
-  if (!context) throw new Error('WhatsApp connection is available inside a connected ReBook shop, not demo mode.');
+  const context = getContext();
+  if (!context) throw new Error('WhatsApp is available from a connected ReBook shop or the protected demo.');
+
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
-  headers.set('X-Shop-Access-Token', context.accessToken);
-  const response = await fetch('/api/shop/' + encodeURIComponent(context.shopId) + '/whatsapp' + suffix, { ...init, headers });
+
+  let url: string;
+  if (context.mode === 'demo') {
+    const pin = getDemoWhatsAppPin();
+    if (!pin) throw new Error('Enter the demo WhatsApp PIN first.');
+    headers.set('X-Demo-WhatsApp-Pin', pin);
+    url = '/api/demo/whatsapp' + suffix;
+  } else {
+    headers.set('X-Shop-Access-Token', context.accessToken!);
+    url = '/api/shop/' + encodeURIComponent(context.shopId!) + '/whatsapp' + suffix;
+  }
+
+  const response = await fetch(url, { ...init, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || ('WhatsApp worker request failed (' + response.status + ').'));
   return data as T;
