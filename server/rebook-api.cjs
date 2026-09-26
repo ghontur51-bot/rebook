@@ -706,7 +706,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     return { shopId: shop.shopId, status: 'failed', eligible: eligible.length, queued: 0, failed: eligible.length, error: 'AUTOMATION_CALLBACK_SECRET is not configured.' };
   }
 
-  const runToken = sha256(`${shop.shopId}|${dayKey}|${now.toISOString()}|${Math.random()}`);
+  const runToken = sha256(`${shop.shopId}|${dayKey}|${now.toISOString()}|${crypto.randomBytes(16).toString('hex')}`);
   const callbackUrl = `${baseUrlFromReq(null)}/api/internal/automation-blast-result`;
 
   try {
@@ -781,8 +781,9 @@ async function setShopAutomationScheduler(shop, schedule) {
 }
 
 async function processAutomationBlastResult(payload) {
-  const shopId = safeShopId(payload?.shopId);
-  const runToken = String(payload?.runToken || '');
+  const shopId = String(payload?.shopId || '').trim();
+  if (!/^[A-Za-z0-9_-]{3,120}$/.test(shopId)) fail(400, 'Invalid shopId.');
+  const runToken = String(payload?.runToken || '').trim();
   const results = Array.isArray(payload?.results) ? payload.results : [];
   if (!runToken) fail(400, 'runToken is required.');
 
