@@ -67,17 +67,19 @@ async function writeWorkerFiles(sandbox) {
 async function installWorkerDependenciesIfNeeded(sandbox) {
   const packagePath = path.posix.join(WORKER_DIR, "node_modules", "whatsapp-web.js", "package.json");
   const exists = await commandSucceeded(sandbox, "test", ["-f", packagePath], { cwd: WORKER_DIR });
-  if (exists) return;
+  if (exists) return true;
 
-  const install = await sandbox.runCommand({
-    cmd: "npm",
-    args: ["install", "--omit=dev", "--no-audit", "--no-fund"],
+  await sandbox.runCommand({
+    cmd: "sh",
+    args: [
+      "-lc",
+      "npm install --omit=dev --no-audit --no-fund >/tmp/rebook-wa-install.log 2>&1 && node index.cjs >>/tmp/rebook-wa-worker.log 2>&1",
+    ],
     cwd: WORKER_DIR,
     env: workerEnv(),
+    detached: true,
   });
-  if (install.exitCode !== 0) {
-    throw new Error("Vercel Sandbox WhatsApp dependency install failed.");
-  }
+  return false;
 }
 
 async function isWorkerHealthy(sandbox) {
@@ -93,27 +95,25 @@ async function isWorkerHealthy(sandbox) {
   return result.exitCode === 0;
 }
 
-async function startWorker(sandbox) {
+async function startWorker(sandbox, dependenciesReady) {
   if (await isWorkerHealthy(sandbox)) return;
 
-  const start = await sandbox.runCommand({
-    cmd: "node",
-    args: ["index.cjs"],
-    cwd: WORKER_DIR,
-    env: workerEnv(),
-    detached: true,
-  });
-
-  if (start.exitCode !== 0) {
-    throw new Error("Vercel Sandbox WhatsApp worker failed to start.");
+  if (dependenciesReady) {
+    await sandbox.runCommand({
+      cmd: "node",
+      args: ["index.cjs"],
+      cwd: WORKER_DIR,
+      env: workerEnv(),
+      detached: true,
+    });
   }
 
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     if (await isWorkerHealthy(sandbox)) return;
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  throw new Error("Vercel Sandbox WhatsApp worker started but did not become healthy on port 5001.");
+  throw new Error("Vercel Sandbox WhatsApp worker is still starting. Refresh and retry in a few seconds.");
 }
 
 async function createOrResumeSandbox() {
@@ -137,14 +137,14 @@ async function createOrResumeSandbox() {
     onCreate: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
-      await installWorkerDependenciesIfNeeded(sandbox);
-      await startWorker(sandbox);
+      const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
+      await startWorker(sandbox, dependenciesReady);
     },
     onResume: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
-      await installWorkerDependenciesIfNeeded(sandbox);
-      await startWorker(sandbox);
+      const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
+      await startWorker(sandbox, dependenciesReady);
     },
   });
 }
