@@ -1,5 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 
 const SANDBOX_NAME_PREFIX = String(process.env.REBOOK_SANDBOX_NAME || "rebook-whatsapp");
 const SANDBOX_PROJECT_ID = String(process.env.REBOOK_SANDBOX_PROJECT_ID || "").trim();
@@ -10,6 +11,12 @@ const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
 const WORKER_VERSION = "2026-09-26-sandbox-v2";
+function deriveInternalSecret(label) {
+  const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
+  if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
+  return crypto.createHash("sha256").update(seed + ":" + label).digest("hex");
+}
+
 
 let sdkPromise;
 const sandboxPromises = new Map();
@@ -37,13 +44,13 @@ function sandboxAuthOptions() {
 function workerEnv() {
   return {
     PORT: String(WORKER_PORT),
-    WHATSAPP_BRIDGE_SECRET: String(process.env.WHATSAPP_BRIDGE_SECRET || ""),
+    WHATSAPP_BRIDGE_SECRET: deriveInternalSecret("rebook-whatsapp-bridge"),
     WHATSAPP_DATA_DIR: DATA_DIR,
     WHATSAPP_MAX_SESSIONS: String(process.env.WHATSAPP_MAX_SESSIONS || "2"),
     WHATSAPP_DEFAULT_COUNTRY_CODE: String(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91"),
     WHATSAPP_MAX_RECIPIENTS: String(process.env.WHATSAPP_MAX_RECIPIENTS || "100"),
     WHATSAPP_MAX_AUTOMATION_RECIPIENTS: String(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || "150"),
-    AUTOMATION_CALLBACK_SECRET: String(process.env.AUTOMATION_CALLBACK_SECRET || ""),
+    AUTOMATION_CALLBACK_SECRET: deriveInternalSecret("rebook-automation-callback"),
     NODE_ENV: "production",
   };
 }
@@ -208,7 +215,7 @@ async function sandboxWorkerFetch(pathname, options = {}) {
     const shopId = extractShopId(pathname, options);
     const baseUrl = await getWorkerBaseUrl(shopId);
     const headers = new Headers(options.headers || {});
-    headers.set("Authorization", "Bearer " + String(process.env.WHATSAPP_BRIDGE_SECRET || ""));
+    headers.set("Authorization", "Bearer " + deriveInternalSecret("rebook-whatsapp-bridge"));
     headers.set("Content-Type", "application/json");
 
     const response = await fetch(baseUrl + pathname, {
