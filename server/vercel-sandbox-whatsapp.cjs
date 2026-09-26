@@ -108,12 +108,12 @@ async function startWorker(sandbox, dependenciesReady) {
     });
   }
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     if (await isWorkerHealthy(sandbox)) return;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  throw new Error("Vercel Sandbox WhatsApp worker is still starting. Refresh and retry in a few seconds.");
+  throw new Error("Vercel Sandbox WhatsApp worker is still starting. Please retry in a few seconds.");
 }
 
 function safeSandboxName(shopId) {
@@ -186,12 +186,15 @@ function extractShopId(pathname, options = {}) {
 
 async function getWorkerBaseUrl(shopId) {
   const sandbox = await getWhatsAppSandbox(shopId);
+  // A persistent sandbox may be stopped after its session timeout. Any command
+  // automatically resumes it, which also runs the onResume hook to restart the worker.
+  await sandbox.runCommand("true", []);
   return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
 }
 
 async function sandboxWorkerFetch(pathname, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_SANDBOX_REQUEST_TIMEOUT_MS || 15000));
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_SANDBOX_REQUEST_TIMEOUT_MS || 55000));
 
   try {
     const shopId = extractShopId(pathname, options);
@@ -223,9 +226,15 @@ async function sandboxWorkerFetch(pathname, options = {}) {
     return body;
   } catch (error) {
     if (error && error.name === "AbortError") {
-      const timeoutError = new Error("Vercel Sandbox WhatsApp worker request timed out.");
+      const timeoutError = new Error("Vercel Sandbox WhatsApp worker is taking too long to start. Please retry in a few seconds.");
       timeoutError.status = 504;
       throw timeoutError;
+    }
+    if (!error?.status) {
+      console.error("Vercel Sandbox WhatsApp worker error:", error);
+      const unavailable = new Error("Vercel Sandbox WhatsApp worker is currently unavailable. Please retry.");
+      unavailable.status = 503;
+      throw unavailable;
     }
     throw error;
   } finally {
