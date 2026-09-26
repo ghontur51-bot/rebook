@@ -1,247 +1,101 @@
-﻿// Frontend WhatsApp Bridge Service for ReBook SaaS
-// Communicates with local Node.js bridge server on http://localhost:5001
+// ReBook WhatsApp service.
+// Production requests are proxied through the ReBook API to the persistent Oracle WhatsApp worker.
+// The worker secret is never exposed to the browser.
 
 export interface BridgeStatus {
   online: boolean;
   isReady: boolean;
   hasQr: boolean;
   qrDataUrl: string | null;
-  clientInfo: {
-    name: string;
-    phone: string;
-  } | null;
+  clientInfo: { name: string; phone: string } | null;
+  connectionState?: string;
   initializationError?: string | null;
-  activeBlast?: {
-    isRunning: boolean;
-    total: number;
-    sentCount: number;
-    currentIndex: number;
-  };
+  suppressionCount?: number;
+  activeBlast?: { isRunning: boolean; total: number; sentCount: number; currentIndex: number };
 }
 
-export interface BlastRecipient {
-  id: number | string;
-  name: string;
-  phone: string;
-  avatar?: string;
+export interface BlastRecipient { id: number | string; name: string; phone: string; avatar?: string; }
+export interface BlastResultItem { id: number | string; name: string; phone: string; status: 'pending' | 'sending' | 'sent' | 'failed'; error?: string | null; }
+export interface BlastProgressResponse { isRunning: boolean; campaignName: string; total: number; sentCount: number; failedCount: number; currentIndex: number; results: BlastResultItem[]; cancelled: boolean; }
+
+function getShopContext(): { shopId: string; accessToken: string } | null {
+  const parts = window.location.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  if (parts[0] !== 'shop' || !parts[1] || !parts[2]) return null;
+  return { shopId: decodeURIComponent(parts[1]), accessToken: decodeURIComponent(parts[2]) };
 }
 
-export interface BlastResultItem {
-  id: number | string;
-  name: string;
-  phone: string;
-  status: "pending" | "sending" | "sent" | "failed";
-  error?: string | null;
+async function bridgeRequest<T>(suffix: string, init: RequestInit = {}): Promise<T> {
+  const context = getShopContext();
+  if (!context) throw new Error('WhatsApp connection is available inside a connected ReBook shop, not demo mode.');
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  headers.set('X-Shop-Access-Token', context.accessToken);
+  const response = await fetch('/api/shop/' + encodeURIComponent(context.shopId) + '/whatsapp' + suffix, { ...init, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || ('WhatsApp worker request failed (' + response.status + ').'));
+  return data as T;
 }
 
-export interface BlastProgressResponse {
-  isRunning: boolean;
-  campaignName: string;
-  total: number;
-  sentCount: number;
-  failedCount: number;
-  currentIndex: number;
-  results: BlastResultItem[];
-  cancelled: boolean;
-}
-
-const BRIDGE_URL = "http://localhost:5001";
-
-// In-flight request deduplication & memory cache to eliminate lag
 let inFlightStatusPromise: Promise<BridgeStatus> | null = null;
 let lastStatusTimestamp = 0;
-let lastKnownStatus: BridgeStatus = {
-  online: false,
-  isReady: false,
-  hasQr: false,
-  qrDataUrl: null,
-  clientInfo: null,
-};
+let lastKnownStatus: BridgeStatus = { online: false, isReady: false, hasQr: false, qrDataUrl: null, clientInfo: null };
 
-/**
- * Deep equality check to prevent React from re-rendering components when status is unchanged
- */
 export function isEqualBridgeStatus(a: BridgeStatus, b: BridgeStatus): boolean {
   if (a === b) return true;
   if (a.online !== b.online || a.isReady !== b.isReady || a.hasQr !== b.hasQr) return false;
-  if (a.qrDataUrl !== b.qrDataUrl) return false;
-  if (a.initializationError !== b.initializationError) return false;
+  if (a.qrDataUrl !== b.qrDataUrl || a.initializationError !== b.initializationError) return false;
+  if (a.connectionState !== b.connectionState || a.suppressionCount !== b.suppressionCount) return false;
   if (Boolean(a.clientInfo) !== Boolean(b.clientInfo)) return false;
-  if (a.clientInfo && b.clientInfo) {
-    if (a.clientInfo.name !== b.clientInfo.name || a.clientInfo.phone !== b.clientInfo.phone) return false;
-  }
-  if (Boolean(a.activeBlast) !== Boolean(b.activeBlast)) return false;
-  if (a.activeBlast && b.activeBlast) {
-    if (
-      a.activeBlast.isRunning !== b.activeBlast.isRunning ||
-      a.activeBlast.sentCount !== b.activeBlast.sentCount ||
-      a.activeBlast.currentIndex !== b.activeBlast.currentIndex ||
-      a.activeBlast.total !== b.activeBlast.total
-    ) {
-      return false;
-    }
-  }
+  if (a.clientInfo && b.clientInfo && (a.clientInfo.name !== b.clientInfo.name || a.clientInfo.phone !== b.clientInfo.phone)) return false;
   return true;
 }
 
-/**
- * Check if local WhatsApp Web bridge server is online and ready
- * Deduplicates in-flight fetches and caches results for up to 800ms
- */
-export async function getBridgeStatus(forceFresh: boolean = false): Promise<BridgeStatus> {
+export async function getBridgeStatus(forceFresh = false): Promise<BridgeStatus> {
   const now = Date.now();
-  if (!forceFresh && inFlightStatusPromise) {
-    return inFlightStatusPromise;
-  }
-  if (!forceFresh && now - lastStatusTimestamp < 800) {
-    return lastKnownStatus;
-  }
-
+  if (!forceFresh && inFlightStatusPromise) return inFlightStatusPromise;
+  if (!forceFresh && now - lastStatusTimestamp < 800) return lastKnownStatus;
   inFlightStatusPromise = (async () => {
     try {
-      const res = await fetch(`${BRIDGE_URL}/api/status`, {
-        method: "GET",
-        signal: AbortSignal.timeout(1800),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const newStatus: BridgeStatus = {
-          online: true,
-          isReady: Boolean(data.isReady),
-          hasQr: Boolean(data.hasQr),
-          qrDataUrl: data.qrDataUrl || null,
-          clientInfo: data.clientInfo || null,
-          initializationError: data.initializationError || null,
-          activeBlast: data.activeBlast,
-        };
-        lastKnownStatus = newStatus;
-        lastStatusTimestamp = Date.now();
-        return newStatus;
-      }
-    } catch {
-      // Bridge server not running or timed out
+      const data = await bridgeRequest<BridgeStatus>('/status', { method: 'GET', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+      const next: BridgeStatus = { online: true, isReady: Boolean(data.isReady), hasQr: Boolean(data.hasQr), qrDataUrl: data.qrDataUrl || null, clientInfo: data.clientInfo || null, connectionState: data.connectionState, initializationError: data.initializationError || null, suppressionCount: data.suppressionCount, activeBlast: data.activeBlast };
+      lastKnownStatus = next; lastStatusTimestamp = Date.now(); return next;
+    } catch (error: any) {
+      const offline: BridgeStatus = { online: false, isReady: false, hasQr: false, qrDataUrl: null, clientInfo: null, initializationError: error?.message || 'WhatsApp worker is unavailable.' };
+      lastKnownStatus = offline; lastStatusTimestamp = Date.now(); return offline;
     }
-    const offlineStatus: BridgeStatus = {
-      online: false,
-      isReady: false,
-      hasQr: false,
-      qrDataUrl: null,
-      clientInfo: null,
-    };
-    lastKnownStatus = offlineStatus;
-    lastStatusTimestamp = Date.now();
-    return offlineStatus;
-  })().finally(() => {
-    inFlightStatusPromise = null;
-  });
-
+  })().finally(() => { inFlightStatusPromise = null; });
   return inFlightStatusPromise;
 }
 
-/**
- * Start automated blast via the local bridge
- */
-export async function startBridgeBlast(
-  recipients: BlastRecipient[],
-  message: string,
-  campaignName: string = "Blast Campaign",
-  delayMs: number = 5000,
-  consentConfirmed: boolean = false
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await fetch(`${BRIDGE_URL}/api/blast`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        recipients,
-        message,
-        campaignName,
-        delayMs,
-        consentConfirmed,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      return { success: false, error: data.error || "Failed to start blast." };
-    }
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || "Cannot reach WhatsApp Bridge on port 5001." };
-  }
+export async function connectBridgeSession(): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/connect', { method: 'POST', body: '{}' }); return { success: true }; }
+  catch (error: any) { return { success: false, error: error?.message || 'Unable to start WhatsApp session.' }; }
 }
 
-/**
- * Poll current blast progress from bridge
- */
+export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/blast', { method: 'POST', body: JSON.stringify({ recipients, message, campaignName, delayMs, consentConfirmed }) }); return { success: true }; }
+  catch (error: any) { return { success: false, error: error?.message || 'Unable to start WhatsApp campaign.' }; }
+}
+
 export async function getBlastProgress(): Promise<BlastProgressResponse | null> {
-  try {
-    const res = await fetch(`${BRIDGE_URL}/api/blast/progress`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch {
-    // ignore
-  }
-  return null;
+  try { return await bridgeRequest<BlastProgressResponse>('/blast/progress', { method: 'GET', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) }); } catch { return null; }
 }
 
-/**
- * Cancel active blast
- */
 export async function cancelBridgeBlast(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BRIDGE_URL}/api/blast/cancel`, { method: "POST" });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  try { await bridgeRequest('/blast/cancel', { method: 'POST', body: '{}' }); return true; } catch { return false; }
 }
 
-/**
- * Send single message to one contact via bridge
- */
-export async function sendSingleViaBridge(
-  phone: string,
-  message: string,
-  name: string,
-  consentConfirmed: boolean = false
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await fetch(`${BRIDGE_URL}/api/send-single`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, message, name, consentConfirmed }),
-    });
-    const data = await res.json();
-    return { success: res.ok, error: data.error };
-  } catch (e: any) {
-    return { success: false, error: e.message || "Bridge unreachable" };
-  }
+export async function sendSingleViaBridge(phone: string, message: string, name: string, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/send-single', { method: 'POST', body: JSON.stringify({ phone, message, name, consentConfirmed }) }); return { success: true }; }
+  catch (error: any) { return { success: false, error: error?.message || 'Unable to send WhatsApp message.' }; }
 }
 
-/**
- * Reset / Disconnect WhatsApp Web session (deletes linked credentials and generates fresh QR)
- */
 export async function resetBridgeSession(): Promise<{ success: boolean; error?: string }> {
-  try {
-    const res = await fetch(`${BRIDGE_URL}/api/reset`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    const data = await res.json();
-    // Force clear internal cache so subsequent calls reflect the fresh state immediately
-    lastKnownStatus = {
-      online: true,
-      isReady: false,
-      hasQr: false,
-      qrDataUrl: null,
-      clientInfo: null,
-    };
-    lastStatusTimestamp = Date.now();
-    return { success: res.ok && Boolean(data.success), error: data.error };
-  } catch (e: any) {
-    return { success: false, error: e.message || "Cannot reach WhatsApp Bridge on port 5001." };
-  }
+  try { await bridgeRequest('/reset', { method: 'POST', body: '{}' }); lastKnownStatus = { online: true, isReady: false, hasQr: false, qrDataUrl: null, clientInfo: null }; lastStatusTimestamp = Date.now(); return { success: true }; }
+  catch (error: any) { return { success: false, error: error?.message || 'Unable to reset WhatsApp session.' }; }
+}
+
+export async function disconnectBridgeSession(): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/disconnect', { method: 'POST', body: '{}' }); return { success: true }; }
+  catch (error: any) { return { success: false, error: error?.message || 'Unable to disconnect WhatsApp.' }; }
 }
