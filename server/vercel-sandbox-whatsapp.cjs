@@ -46,6 +46,7 @@ function workerEnv() {
     PORT: String(WORKER_PORT),
     WHATSAPP_BRIDGE_SECRET: deriveInternalSecret("rebook-whatsapp-bridge"),
     WHATSAPP_DATA_DIR: DATA_DIR,
+    PUPPETEER_CACHE_DIR: path.posix.join(DATA_DIR, "puppeteer-cache"),
     WHATSAPP_MAX_SESSIONS: String(process.env.WHATSAPP_MAX_SESSIONS || "2"),
     WHATSAPP_DEFAULT_COUNTRY_CODE: String(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91"),
     WHATSAPP_MAX_RECIPIENTS: String(process.env.WHATSAPP_MAX_RECIPIENTS || "100"),
