@@ -37,7 +37,22 @@ export function clearDemoWhatsAppPin() {
   sessionStorage.removeItem('rebook_demo_whatsapp_pin');
 }
 
-async function bridgeRequest<T>(suffix: string, init: RequestInit = {}): Promise<T> {
+export async function verifyDemoWhatsAppPin(pin: string): Promise<{ success: boolean; error?: string }> {
+  const candidate = String(pin || '').trim();
+  if (!candidate) return { success: false, error: 'Enter the demo WhatsApp PIN first.' };
+  try {
+    await bridgeRequest('/verify', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    }, candidate);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Unable to verify the demo WhatsApp PIN.' };
+  }
+}
+
+async function bridgeRequest<T>(suffix: string, init: RequestInit = {}, demoPinOverride?: string): Promise<T> {
   const context = getContext();
   if (!context) throw new Error('WhatsApp is available from a connected ReBook shop or the protected demo.');
 
@@ -46,7 +61,7 @@ async function bridgeRequest<T>(suffix: string, init: RequestInit = {}): Promise
 
   let url: string;
   if (context.mode === 'demo') {
-    const pin = getDemoWhatsAppPin();
+    const pin = String(demoPinOverride ?? getDemoWhatsAppPin()).trim();
     if (!pin) throw new Error('Enter the demo WhatsApp PIN first.');
     headers.set('X-Demo-WhatsApp-Pin', pin);
     url = '/api/demo/whatsapp' + suffix;
