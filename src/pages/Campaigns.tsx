@@ -296,7 +296,7 @@ function WhatsAppBlastModal({
   const handleSendSingle = async (customer: WACustomer) => {
     if (bridgeStatus.online && bridgeStatus.isReady) {
       setSendList(prev => prev.map(c => c.id === customer.id ? { ...c, status: "sending" } : c));
-      const res = await sendSingleViaBridge(customer.phone, currentMessage, customer.name);
+      const res = await sendSingleViaBridge(customer.phone, currentMessage, customer.name, true);
       if (res.success) {
         setSendList(prev => prev.map(c => c.id === customer.id ? { ...c, status: "sent" } : c));
         setSentCount(prev => Math.min(prev + 1, totalCount));
@@ -394,7 +394,7 @@ function WhatsAppBlastModal({
                       ? `WhatsApp Connected (${bridgeStatus.clientInfo?.name || "Linked Device"})`
                       : bridgeStatus.hasQr
                       ? "Pairing QR Code Ready"
-                      : "WhatsApp Bridge (Offline or Simulator)"}
+                      : "WhatsApp Bridge (Local)"}
                   </div>
                   <div style={{ color: "var(--muted-foreground)", fontSize: 11, marginTop: 1 }}>
                     {bridgeStatus.isReady
@@ -513,7 +513,7 @@ function WhatsAppBlastModal({
                   <li>Open your terminal in <code>d:\rebook2</code>.</li>
                   <li>Run command: <code style={{ background: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontWeight: 700, color: "#0F172A" }}>npm run wa-bridge</code></li>
                   <li>Click <strong>Connect to WhatsApp</strong> above to scan the QR code.</li>
-                  <li>Once connected, click <strong>Start 100% Automated Blast</strong>!</li>
+                  <li>Once connected, click <strong>Start WhatsApp Send</strong>!</li>
                 </ol>
                 <div style={{ fontSize: 11, color: "#64748B", background: "rgba(255,255,255,0.5)", padding: "6px 10px", borderRadius: 8 }}>
                   💡 <em>Zero paid Meta API keys required. Operates directly with regular WhatsApp Web.</em>
@@ -568,7 +568,7 @@ function WhatsAppBlastModal({
                     Automated Blast Completed!
                   </div>
                   <div style={{ fontSize: 13, color: "#166534", lineHeight: 1.5, marginBottom: 12 }}>
-                    Successfully delivered to all {totalCount} customers with 0 manual keypresses.
+Submitted {totalCount} messages to the local WhatsApp session. WhatsApp delivery/read status is not guaranteed by this bridge.
                   </div>
                   <button
                     onClick={startAutomatedBlast}
@@ -605,21 +605,26 @@ function WhatsAppBlastModal({
                 </div>
               ) : (
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ marginBottom: 14, padding: "12px 14px", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 10 }}>
+                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#334155", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={consentConfirmed}
+                      onChange={(e) => setConsentConfirmed(e.target.checked)}
+                      disabled={totalCount === 0 || isBlasting}
+                      style={{ marginTop: 2 }}
+                    />
+                    <span><strong>Consent confirmed:</strong> every recipient in this queue has explicitly opted in to receive WhatsApp messages from this business.</span>
+                  </label>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                     <div style={{ fontSize: 13, color: "var(--muted-foreground)", textAlign: "left" }}>
                       Target: <strong>{totalCount} customers</strong> ({campaign.audience})
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted-foreground)" }}>
-                      <span>Speed:</span>
-                      <select
-                        value={delaySeconds}
-                        onChange={e => setDelaySeconds(Number(e.target.value))}
-                        style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff" }}
-                      >
-                        <option value={2}>2s / msg (Fast)</option>
-                        <option value={3}>3s / msg (Recommended)</option>
-                        <option value={5}>5s / msg (Safe Anti-ban)</option>
-                      </select>
+                      <span>Pacing:</span>
+                    <span style={{ fontWeight: 700 }}>5s / message</span>
                     </div>
                   </div>
 
@@ -639,7 +644,7 @@ function WhatsAppBlastModal({
                     Start 100% Automated Blast
                   </button>
                   <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 8 }}>
-                    Dispatches each message in sequence without manual typing.
+Sends one message at a time from the connected WhatsApp session. Only customers with recorded WhatsApp opt-in are eligible.
                   </div>
                 </div>
               )}
@@ -664,7 +669,7 @@ function WhatsAppBlastModal({
                 Recipients Queue ({totalCount})
               </div>
               <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
-                Auto-dispatches one by one
+                One at a time · opt-in only
               </div>
             </div>
 
