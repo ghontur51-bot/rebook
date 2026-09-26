@@ -82,7 +82,7 @@ function DemoApp() {
 }
 
 function RouteResolver() {
-  const path = window.location.pathname.replace(//+$/, "") || "/";
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
 
   if (parts[0] === "superadmin") return <SuperAdmin />;
