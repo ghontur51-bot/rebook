@@ -633,10 +633,18 @@ function WhatsAppBlastModal({
                   <div style={{ padding: "30px 20px", background: "rgba(255,255,255,0.6)", borderRadius: 12, maxWidth: 300, margin: "0 auto" }}>
                     <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
-                      {bridgeStatus.connectionState === "PAIRING" ? "Waiting for pairing QR..." : "Starting WhatsApp worker..."}
+                      {bridgeStatus.connectionState === "PAIRING"
+                        ? "Waiting for pairing QR..."
+                        : bridgeStatus.connectionState === "LOADING"
+                        ? `Loading WhatsApp Web (${bridgeStatus.loadingPercent || 0}%)...`
+                        : bridgeStatus.connectionState === "BROWSER_STARTED"
+                        ? "Browser started — loading WhatsApp Web..."
+                        : "Starting WhatsApp worker..."}
                     </div>
                     <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>
-                      The Vercel Sandbox worker is running. The QR will appear automatically when WhatsApp Web finishes starting.
+                      {bridgeStatus.connectionState === "PAIRING"
+                        ? "The QR code should appear here automatically."
+                        : "The Sandbox browser is running. ReBook will show the QR as soon as WhatsApp Web emits it."}
                     </div>
                   </div>
                 )}
