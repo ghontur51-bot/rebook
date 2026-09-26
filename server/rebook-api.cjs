@@ -33,6 +33,8 @@ const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const WHATSAPP_BRIDGE_BASE_URL = String(process.env.WHATSAPP_BRIDGE_BASE_URL || '').replace(/\/$/, '');
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || '');
+const DEMO_WHATSAPP_PIN = String(process.env.DEMO_WHATSAPP_PIN || '');
+const DEMO_WHATSAPP_SHOP_ID = String(process.env.DEMO_WHATSAPP_SHOP_ID || 'demo_whatsapp_test');
 
 const CENTRAL_SERVICE_ACCOUNT_JSON = process.env.CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON || '';
 const CENTRAL_PROJECT_ID = process.env.CENTRAL_FIREBASE_PROJECT_ID || '';
@@ -406,6 +408,17 @@ async async function whatsappBridgeFetch(pathname, options = {}) {
   }
 }
 
+function requireDemoWhatsApp(req, res, next) {
+  if (!DEMO_WHATSAPP_PIN) return res.status(404).json({ error: 'Demo WhatsApp testing is disabled.' });
+  const supplied = String(req.headers['x-demo-whatsapp-pin'] || '');
+  if (!supplied || supplied !== DEMO_WHATSAPP_PIN) return res.status(401).json({ error: 'Invalid demo WhatsApp PIN.' });
+  next();
+}
+
+async function demoWhatsAppProxy(pathname, options = {}) {
+  return whatsappBridgeFetch(pathname, options);
+}
+
 function requireShopAccess(req, res, next) {
   try {
     const shopId = req.params.shopId;
@@ -759,6 +772,46 @@ app.post('/api/razorpay/webhook', async (req, res, next) => {
 });
 
 // WhatsApp worker proxy. The browser never talks directly to Oracle.
+app.get('/api/demo/whatsapp/status', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy(`/api/status?shopId=${encodeURIComponent(DEMO_WHATSAPP_SHOP_ID)}`, { method: 'GET' })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/connect', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/connect', { method: 'POST', body: JSON.stringify({ shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/send-single', requireDemoWhatsApp, async (req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/send-single', { method: 'POST', body: JSON.stringify({ ...(req.body || {}), shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/blast', requireDemoWhatsApp, async (req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/blast', { method: 'POST', body: JSON.stringify({ ...(req.body || {}), shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
+app.get('/api/demo/whatsapp/blast/progress', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy(`/api/blast/progress?shopId=${encodeURIComponent(DEMO_WHATSAPP_SHOP_ID)}`, { method: 'GET' })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/blast/cancel', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/blast/cancel', { method: 'POST', body: JSON.stringify({ shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/reset', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/reset', { method: 'POST', body: JSON.stringify({ shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
+app.post('/api/demo/whatsapp/disconnect', requireDemoWhatsApp, async (_req, res, next) => {
+  try { res.json(await demoWhatsAppProxy('/api/disconnect', { method: 'POST', body: JSON.stringify({ shopId: DEMO_WHATSAPP_SHOP_ID }) })); }
+  catch (e) { next(e); }
+});
+
 app.get('/api/shop/:shopId/whatsapp/status', requireShopAccess, async (req, res, next) => {
   try {
     const data = await whatsappBridgeFetch(`/api/status?shopId=${encodeURIComponent(req.params.shopId)}`, { method: 'GET' });
