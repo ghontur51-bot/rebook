@@ -1,0 +1,41 @@
+name: ReBook production verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: JavaScript syntax check
+        run: |
+          node --check server/rebook-api.cjs
+          node --check server/whatsapp-bridge.cjs
+          node --check api/index.js
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify no committed secrets
+        run: |
+          ! git ls-files | grep -E '(^|/)\.env$|service-account.*\.json$|firebase.*private.*key'
