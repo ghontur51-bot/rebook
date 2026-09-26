@@ -228,6 +228,8 @@ interface AppContextType {
   automations: Automation[];
   toggleAutomation: (id: number) => void;
   saveAutomation: (automation: Partial<Automation> & { name: string; trigger: string; action: string; message: string; id?: number }) => void;
+  automationScheduler: AutomationSchedulerSettings;
+  updateAutomationScheduler: (updates: Partial<AutomationSchedulerSettings>) => void;
 
   // Campaigns
   campaigns: Campaign[];
@@ -270,23 +272,66 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: "rebook_notifications_v1",
   AUTOMATION_RUNS: "rebook_automation_runs_v1",
   STAFF: "rebook_staff_v1",
+  AUTOMATION_SCHEDULER: "rebook_automation_scheduler_v1",
 };
 
 
 export interface AutomationRun {
   automationId: number;
   customerId: number;
-  triggeredAt: string; // ISO timestamp when the automation message/run happened
-  status: "sent" | "recorded" | "failed";
-  dedupeKey: string; // stable event key; one successful run per key
-  triggerBookingId?: number; // booking that caused a spend-triggered automation
-  convertedAt?: string; // ISO timestamp when a later booking was attributed as a conversion
-  bookingId?: number; // booking that caused the conversion
+  triggeredAt: string;
+  status: "queued" | "sent" | "recorded" | "failed";
+  dedupeKey: string;
+  triggerBookingId?: number;
+  sentAt?: string;
+  convertedAt?: string;
+  bookingId?: number;
+  messageText?: string;
 }
 
 // A conversion is attributed only to the latest successful automation run for that
 // customer when the next confirmed/completed booking happens within this window.
 export const AUTOMATION_CONVERSION_WINDOW_DAYS = 7;
+
+export interface AutomationSchedulerSettings {
+  enabled: boolean;
+  runHour: number;
+  timezone: string;
+  lastRunDate: string | null;
+  lastRunAt: string | null;
+  lastRunStatus: "never" | "success" | "partial" | "failed";
+  lastRunSummary: { eligible: number; queued: number; failed: number } | null;
+}
+
+export const DEFAULT_AUTOMATION_SCHEDULER: AutomationSchedulerSettings = {
+  enabled: true,
+  runHour: 23,
+  timezone: "Asia/Kolkata",
+  lastRunDate: null,
+  lastRunAt: null,
+  lastRunStatus: "never",
+  lastRunSummary: null,
+};
+
+export function normalizeAutomationScheduler(value?: Partial<AutomationSchedulerSettings> | null): AutomationSchedulerSettings {
+  const runHour = Number(value?.runHour);
+  const normalizedHour = Number.isInteger(runHour) && runHour >= 0 && runHour <= 23
+    ? runHour
+    : DEFAULT_AUTOMATION_SCHEDULER.runHour;
+  const lastRunStatus = value?.lastRunStatus;
+  return {
+    ...DEFAULT_AUTOMATION_SCHEDULER,
+    ...(value || {}),
+    enabled: value?.enabled !== false,
+    runHour: normalizedHour,
+    timezone: String(value?.timezone || DEFAULT_AUTOMATION_SCHEDULER.timezone),
+    lastRunDate: value?.lastRunDate || null,
+    lastRunAt: value?.lastRunAt || null,
+    lastRunStatus: lastRunStatus === "success" || lastRunStatus === "partial" || lastRunStatus === "failed" ? lastRunStatus : "never",
+    lastRunSummary: value?.lastRunSummary || null,
+  };
+}
+
 const AUTOMATION_ENGINE_VERSION_KEY = "rebook_automation_engine_version";
 const AUTOMATION_ENGINE_VERSION = "3";
 
@@ -395,6 +440,10 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     loadStored(STORAGE_KEYS.NOTIFICATIONS, defaultNotifications)
   );
 
+  const [automationScheduler, setAutomationScheduler] = useState<AutomationSchedulerSettings>(() =>
+    normalizeAutomationScheduler(loadStored(STORAGE_KEYS.AUTOMATION_SCHEDULER, DEFAULT_AUTOMATION_SCHEDULER))
+  );
+
   const [staff, setStaff] = useState<ShopAssistant[]>(() =>
     loadStored(STORAGE_KEYS.STAFF, initialStaff as ShopAssistant[])
   );
@@ -422,6 +471,7 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
       };
       setSalon(cloudSalon);
       setNotifications(state.notifications || defaultNotifications);
+      setAutomationScheduler(normalizeAutomationScheduler(state.automationScheduler));
       setStaff(Array.isArray(state.staff) ? state.staff : []);
       const cloudAutomations = Array.isArray(state.automations) ? state.automations : [];
       const cloudRuns = Array.isArray(state.automationRuns) ? state.automationRuns : [];
@@ -436,6 +486,7 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
         messages: JSON.stringify(Array.isArray(state.messages) ? state.messages : []),
         salon: JSON.stringify(cloudSalon),
         notifications: JSON.stringify(state.notifications || defaultNotifications),
+        automationScheduler: JSON.stringify(normalizeAutomationScheduler(state.automationScheduler)),
         staff: JSON.stringify(Array.isArray(state.staff) ? state.staff : []),
       };
       setCloudLoaded(true);
@@ -459,6 +510,7 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
   useEffect(() => { if (!isCloud) saveStored(STORAGE_KEYS.MESSAGES, customerMessages); }, [customerMessages, isCloud]);
   useEffect(() => { if (!isCloud) saveStored(STORAGE_KEYS.SALON, salon); }, [salon, isCloud]);
   useEffect(() => { if (!isCloud) saveStored(STORAGE_KEYS.NOTIFICATIONS, notifications); }, [notifications, isCloud]);
+  useEffect(() => { if (!isCloud) saveStored(STORAGE_KEYS.AUTOMATION_SCHEDULER, automationScheduler); }, [automationScheduler, isCloud]);
   useEffect(() => { if (!isCloud) saveStored(STORAGE_KEYS.STAFF, staff); }, [staff, isCloud]);
 
   const cloudSyncArray = (collection: string, value: unknown[], key = "id") => {
@@ -510,6 +562,13 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     cloudBaselineRef.current.notifications = serialized;
     void syncCloudCollection(runtime, "notifications", [{ __docId: "current", ...notifications }]).catch((error) => console.error("Cloud sync failed for notifications:", error));
   }, [notifications, isCloud, cloudLoaded]);
+  useEffect(() => {
+    if (!isCloud || !runtime || !cloudLoaded) return;
+    const serialized = JSON.stringify(automationScheduler);
+    if (cloudBaselineRef.current.automationScheduler === serialized) return;
+    cloudBaselineRef.current.automationScheduler = serialized;
+    void syncCloudCollection(runtime, "automationScheduler", [{ __docId: "current", ...automationScheduler }]).catch((error) => console.error("Cloud sync failed for automation scheduler:", error));
+  }, [automationScheduler, isCloud, cloudLoaded]);
 
 
   // Execution history — stored in a ref so reads/writes don't trigger re-renders
@@ -517,18 +576,8 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     loadStored<AutomationRun[]>(STORAGE_KEYS.AUTOMATION_RUNS, [])
   );
 
-  // Automation engine.
-  // The rules signature intentionally excludes live counters so updating stats cannot
-  // recursively execute an automation again.
-  const automationRulesSignature = automations
-    .map((a) => `${a.id}|${a.status}|${a.trigger}|${a.action}|${a.message}`)
-    .join("||");
-
-  useEffect(() => {
-    if (isCloud && !cloudLoaded) return;
-    executeAutomations(automations, customers, runsRef, setAutomations);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customers, bookings, automationRulesSignature, isCloud, cloudLoaded]);
+  // Inactivity automations are executed by the server-side scheduled runner.
+  // The browser only fires event-driven ₹5,000+ booking automations immediately.
 
   // --- Actions ---
 
@@ -891,6 +940,10 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     setNotifications((prev) => ({ ...prev, ...updates }));
   };
 
+  const updateAutomationScheduler = (updates: Partial<AutomationSchedulerSettings>) => {
+    setAutomationScheduler((prev) => normalizeAutomationScheduler({ ...prev, ...updates }));
+  };
+
   const addStaff = (assistant: Omit<ShopAssistant, "id">) => {
     setStaff((prev) => [...prev, { 
       ...assistant, 
@@ -922,6 +975,7 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
         setCustomerMessages([]);
         setSalon(defaultSalon);
         setNotifications(defaultNotifications);
+        setAutomationScheduler(DEFAULT_AUTOMATION_SCHEDULER);
         setStaff([]);
         runsRef.current = [];
       }).catch((error) => console.error("Cloud reset failed:", error));
@@ -945,6 +999,7 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     setCustomerMessages(defaultInitialMessages);
     setSalon(defaultSalon);
     setNotifications(defaultNotifications);
+    setAutomationScheduler(DEFAULT_AUTOMATION_SCHEDULER);
     setStaff(initialStaff as ShopAssistant[]);
   };
 
@@ -1067,6 +1122,8 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
         automations,
         toggleAutomation,
         saveAutomation,
+        automationScheduler,
+        updateAutomationScheduler,
         campaigns: dynamicCampaigns,
         addCampaign,
         recordBlastResults,
@@ -1100,7 +1157,7 @@ function resetAutomationStats(autos: Automation[]): Automation[] {
 
 function syncAutomationStats(auto: Automation, runs: AutomationRun[]): Automation {
   const successfulRuns = runs.filter(
-    (r) => r.automationId === auto.id && (r.status === "sent" || r.status === "recorded")
+    (r) => r.automationId === auto.id && (r.status === "queued" || r.status === "sent" || r.status === "recorded")
   );
   const converted = successfulRuns.filter((r) => r.bookingId !== undefined).length;
   const triggered = successfulRuns.length;
@@ -1176,9 +1233,9 @@ async function runAutomationAction(
 ): Promise<AutomationRun["status"] | null> {
   const actionLower = (auto.action || "").toLowerCase();
   const isWhatsApp = actionLower.includes("whatsapp");
-  const isSms = actionLower.includes("sms");
 
   if (isWhatsApp) {
+    if (customer.whatsappOptIn !== true) return null;
     const phone = (customer.phone || "").trim();
     if (!phone || normalizePhone(phone).length !== 10) return null;
 
@@ -1191,13 +1248,9 @@ async function runAutomationAction(
     }
   }
 
-  if (isSms) {
-    // No SMS provider is connected in this frontend. Record the automation intent
-    // without pretending that a real SMS was delivered.
-    return "recorded";
-  }
-
-  return "recorded";
+  // SMS and Email are intentionally not executed because ReBook has no
+  // delivery provider connected for those channels.
+  return null;
 }
 
 async function executeAutomations(
@@ -1326,7 +1379,7 @@ function checkAutomationConversions(
       if (run.bookingId !== undefined) return false;
       if (run.triggerBookingId === bookingId) return false;
       if (run.status !== "sent" && run.status !== "recorded") return false;
-      const triggerTime = new Date(run.triggeredAt).getTime();
+      const triggerTime = new Date(run.sentAt || run.triggeredAt).getTime();
       if (!Number.isFinite(triggerTime) || triggerTime > bookingTime) return false;
       const diffDays = (bookingTime - triggerTime) / 86400000;
       return diffDays >= 0 && diffDays <= AUTOMATION_CONVERSION_WINDOW_DAYS;

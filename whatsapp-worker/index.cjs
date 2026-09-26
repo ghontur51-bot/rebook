@@ -87,6 +87,10 @@ function freshBlast() {
     currentIndex: -1,
     results: [],
     cancelled: false,
+    automation: false,
+    callbackUrl: null,
+    callbackSecret: null,
+    runToken: null,
   };
 }
 
@@ -244,6 +248,48 @@ function assertConsent(consentConfirmed) {
   if (consentConfirmed !== true) throw new Error("Sending is blocked until explicit WhatsApp opt-in is confirmed.");
 }
 
+async function notifyAutomationCallback(blast) {
+  if (!blast.automation || !blast.callbackUrl || !blast.callbackSecret || !blast.runToken) return;
+
+  const payload = {
+    shopId: blast.shopId,
+    runToken: blast.runToken,
+    campaignName: blast.campaignName,
+    sentCount: blast.sentCount,
+    failedCount: blast.failedCount,
+    cancelled: blast.cancelled,
+    results: blast.results.map((result) => ({
+      id: result.id,
+      status: result.status,
+      error: result.error || null,
+      messageId: result.messageId || null,
+      sentAt: result.sentAt || null,
+    })),
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(blast.callbackUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${blast.callbackSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) return;
+      const body = await response.text().catch(() => "");
+      console.error("Automation callback rejected:", blast.shopId, response.status, body);
+    } catch (error) {
+      console.error("Automation callback failed:", blast.shopId, error.message);
+    }
+
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 1 ? 2000 : 5000));
+    }
+  }
+}
+
 async function sendOne(shopId, { phone, message, name }) {
   const s = await getSessionReady(shopId);
   if (!s.isReady || !s.client) throw new Error("WhatsApp is not connected. Scan the QR code first.");
@@ -331,12 +377,29 @@ app.post("/api/send-single", async (req, res) => {
 
 app.post("/api/blast", async (req, res) => {
   try {
-    const { shopId, recipients, message, campaignName, consentConfirmed } = req.body || {};
+    const { shopId, recipients, message, campaignName, consentConfirmed, automation, callbackUrl, callbackSecret, runToken } = req.body || {};
     assertConsent(consentConfirmed);
+    if (automation === true) {
+      if (!callbackUrl || !callbackSecret || !runToken) throw new Error("Automation callback configuration is incomplete.");
+      try {
+        const parsed = new URL(String(callbackUrl));
+        if (parsed.protocol !== "https:") throw new Error("Automation callback URL must use HTTPS.");
+      } catch {
+        throw new Error("Automation callback URL is invalid.");
+      }
+    }
     const s = await getSessionReady(shopId);
     if (!s.isReady) throw new Error("WhatsApp is not connected. Scan the QR code first.");
     if (!Array.isArray(recipients) || recipients.length === 0) throw new Error("Recipients list is required.");
-    if (recipients.length > MAX_RECIPIENTS_PER_BLAST) throw new Error(`This worker allows at most ${MAX_RECIPIENTS_PER_BLAST} recipients per campaign.`);
+
+    const automationMax = Math.max(
+      MAX_RECIPIENTS_PER_BLAST,
+      Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 500), 500),
+    );
+    const maxRecipients = automation === true ? automationMax : MAX_RECIPIENTS_PER_BLAST;
+    if (recipients.length > maxRecipients) {
+      throw new Error(`This worker allows at most ${maxRecipients} recipients per campaign.`);
+    }
     if (s.activeBlast.isRunning) return res.status(409).json({ error: "A WhatsApp campaign is already running for this shop." });
 
     const seen = new Set();
@@ -344,7 +407,14 @@ app.post("/api/blast", async (req, res) => {
       const phone = normalizePhone(recipient?.phone);
       if (seen.has(phone)) throw new Error(`Duplicate recipient detected: ${phone}.`);
       seen.add(phone);
-      return { id: recipient?.id ?? index, name: String(recipient?.name || "Customer"), phone, status: "pending", error: null };
+      return {
+        id: recipient?.id ?? index,
+        name: String(recipient?.name || "Customer"),
+        phone,
+        message: String(recipient?.message || message || ""),
+        status: "pending",
+        error: null,
+      };
     }).filter((recipient) => !s.suppressedNumbers.has(recipient.phone));
 
     if (!queue.length) throw new Error("No eligible recipients remain after WhatsApp opt-out filtering.");
@@ -358,6 +428,11 @@ app.post("/api/blast", async (req, res) => {
       currentIndex: -1,
       results: queue,
       cancelled: false,
+      automation: automation === true,
+      callbackUrl: automation === true ? String(callbackUrl) : null,
+      callbackSecret: automation === true ? String(callbackSecret) : null,
+      runToken: automation === true ? String(runToken) : null,
+      shopId,
     };
 
     res.json({ success: true, total: queue.length });
@@ -373,6 +448,7 @@ app.post("/api/blast", async (req, res) => {
           const result = await sendOne(shopId, target);
           target.status = "sent";
           target.messageId = result.messageId;
+          target.sentAt = new Date().toISOString();
           s.activeBlast.sentCount += 1;
         } catch (error) {
           target.status = "failed";
@@ -387,9 +463,11 @@ app.post("/api/blast", async (req, res) => {
 
       s.activeBlast.isRunning = false;
       s.activeBlast.currentIndex = -1;
-    })().catch((error) => {
+      await notifyAutomationCallback(s.activeBlast);
+    })().catch(async (error) => {
       s.activeBlast.isRunning = false;
       s.activeBlast.currentIndex = -1;
+      if (s.activeBlast.automation) await notifyAutomationCallback(s.activeBlast);
       console.error("Blast worker error:", shopId, error);
     });
   } catch (error) {
