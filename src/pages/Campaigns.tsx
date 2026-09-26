@@ -400,9 +400,13 @@ function WhatsAppBlastModal({
                     <span style={{ fontSize: 11, background: "#FEF9C3", color: "#854D0E", padding: "2px 8px", borderRadius: 20, fontWeight: 700, border: "1px solid #FDE047" }}>
                       ● QR Ready
                     </span>
+                  ) : bridgeStatus.online ? (
+                    <span style={{ fontSize: 11, background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: 20, fontWeight: 700, border: "1px solid #BFDBFE" }}>
+                      ● Sandbox Starting
+                    </span>
                   ) : (
                     <span style={{ fontSize: 11, background: "#F1F5F9", color: "#64748B", padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>
-                      ● Bridge Offline
+                      ● Sandbox Offline
                     </span>
                   )}
                 </div>
@@ -599,11 +603,41 @@ function WhatsAppBlastModal({
                   <div style={{ display: "inline-block", padding: 8, background: "#fff", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}>
                     <img src={bridgeStatus.qrDataUrl} alt="WhatsApp QR Code" style={{ width: 190, height: 190, display: "block" }} />
                   </div>
+                ) : bridgeStatus.initializationError ? (
+                  <div style={{ padding: "24px 20px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, maxWidth: 360, margin: "0 auto" }}>
+                    <div style={{ fontSize: 22, marginBottom: 8 }}>⚠️</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#991B1B" }}>WhatsApp worker needs attention</div>
+                    <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 5, lineHeight: 1.5 }}>{bridgeStatus.initializationError}</div>
+                    <button
+                      className="btn-secondary"
+                      style={{ marginTop: 12 }}
+                      onClick={async () => {
+                        const result = await connectBridgeSession();
+                        if (!result.success) {
+                          setPopupData({
+                            isOpen: true,
+                            title: "WhatsApp connection retry failed",
+                            message: result.error || "Unable to restart the Vercel Sandbox worker.",
+                            type: "error"
+                          });
+                          return;
+                        }
+                        const fresh = await getBridgeStatus(true);
+                        setBridgeStatus(fresh);
+                      }}
+                    >
+                      Retry connection
+                    </button>
+                  </div>
                 ) : (
                   <div style={{ padding: "30px 20px", background: "rgba(255,255,255,0.6)", borderRadius: 12, maxWidth: 300, margin: "0 auto" }}>
                     <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>Generating fresh pairing code...</div>
-                    <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>The Vercel Sandbox worker is starting automatically. No local Node.js process is required.</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
+                      {bridgeStatus.connectionState === "PAIRING" ? "Waiting for pairing QR..." : "Starting WhatsApp worker..."}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>
+                      The Vercel Sandbox worker is running. The QR will appear automatically when WhatsApp Web finishes starting.
+                    </div>
                   </div>
                 )}
 
