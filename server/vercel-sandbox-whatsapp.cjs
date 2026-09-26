@@ -186,7 +186,7 @@ function extractShopId(pathname, options = {}) {
 
 async function getWorkerBaseUrl(shopId) {
   const sandbox = await getWhatsAppSandbox(shopId);
-  return String(sandbox.domain(WORKER_PORT)).replace(//$/, "");
+  return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
 }
 
 async function sandboxWorkerFetch(pathname, options = {}) {
