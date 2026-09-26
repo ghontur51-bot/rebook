@@ -639,6 +639,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   let skippedNoConsent = 0;
   for (const auto of automations.filter((item) => item.status === 'active' && String(item.action || '').toLowerCase().includes('whatsapp'))) {
     if (String(auto.trigger || '').toLowerCase().includes('5,000')) continue;
+
     for (const customer of customers) {
       if (customer.whatsappOptIn !== true) {
         skippedNoConsent += 1;
@@ -661,11 +662,15 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     }
   }
 
+  const baseSchedule = {
+    ...schedule,
+    lastRunAt: now.toISOString(),
+    lastRunDate: dayKey,
+  };
+
   if (!eligible.length) {
     const updatedSchedule = {
-      ...schedule,
-      lastRunDate: dayKey,
-      lastRunAt: now.toISOString(),
+      ...baseSchedule,
       lastRunStatus: 'success',
       lastRunSummary: { eligible: 0, queued: 0, failed: 0 },
     };
@@ -675,76 +680,133 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
 
   if (!AUTOMATION_CALLBACK_SECRET) {
     const failedSchedule = {
-      ...schedule,
-      lastRunAt: now.toISOString(),
+      ...baseSchedule,
       lastRunStatus: 'failed',
       lastRunSummary: { eligible: eligible.length, queued: 0, failed: eligible.length },
     };
     await setShopAutomationScheduler(shop, failedSchedule);
-    return { shopId: shop.shopId, status: 'failed', eligible: eligible.length, queued: 0, failed: eligible.length, error: 'AUTOMATION_CALLBACK_SECRET is not configured.' };
+    return {
+      shopId: shop.shopId,
+      status: 'failed',
+      eligible: eligible.length,
+      queued: 0,
+      failed: eligible.length,
+      error: 'AUTOMATION_CALLBACK_SECRET is not configured.',
+    };
   }
 
-  const runToken = sha256(`${shop.shopId}|${dayKey}|${now.toISOString()}|${crypto.randomBytes(16).toString('hex')}`);
+  const batchSize = Math.max(
+    1,
+    Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 150), 500),
+  );
+  const schedulerRunToken = sha256(
+    `${shop.shopId}|${dayKey}|${now.toISOString()}|${crypto.randomBytes(16).toString('hex')}`,
+  );
   const callbackUrl = `${baseUrlFromReq(null)}/api/internal/automation-blast-result`;
 
-  try {
-    await whatsappBridgeFetch('/api/blast', {
-      method: 'POST',
-      body: JSON.stringify({
-        shopId: shop.shopId,
-        recipients: eligible.map((item) => ({
-          id: `${item.automationId}-${item.customerId}`,
-          name: item.name,
-          phone: item.phone,
-          message: item.message,
-        })),
-        message: eligible[0].message,
-        campaignName: 'Scheduled Customer Automations',
-        consentConfirmed: true,
-        automation: true,
-        callbackUrl,
-        callbackSecret: AUTOMATION_CALLBACK_SECRET,
-        runToken,
-      }),
-    });
-  } catch (error) {
-    const failedSchedule = {
-      ...schedule,
-      lastRunAt: now.toISOString(),
-      lastRunStatus: 'failed',
-      lastRunSummary: { eligible: eligible.length, queued: 0, failed: eligible.length },
-    };
-    await setShopAutomationScheduler(shop, failedSchedule);
-    return { shopId: shop.shopId, status: 'failed', eligible: eligible.length, queued: 0, failed: eligible.length, error: error.message };
+  let queued = 0;
+  let failed = 0;
+  let currentRuns = [...automationRuns];
+
+  for (let offset = 0; offset < eligible.length; offset += batchSize) {
+    const batch = eligible.slice(offset, offset + batchSize);
+    const batchNumber = Math.floor(offset / batchSize) + 1;
+    const runToken = `${schedulerRunToken}-b${batchNumber}`;
+
+    const newRuns = batch.map((item) => ({
+      automationId: item.automationId,
+      customerId: item.customerId,
+      triggeredAt: now.toISOString(),
+      status: 'queued',
+      dedupeKey: item.dedupeKey,
+      runToken,
+      runDay: dayKey,
+      messageText: item.message,
+    }));
+
+    // Persist the queued runs BEFORE handing the job to the worker. This closes
+    // the race where a very fast callback arrives before Firestore knows the run.
+    const preQueueWrites = [
+      ...newRuns.map((run) =>
+        makeUpdateWrite(projectId, 'automationRuns', sha256(`${run.dedupeKey}|${run.triggeredAt}`), run),
+      ),
+    ];
+    if (preQueueWrites.length) await commitWrites(serviceAccount, projectId, preQueueWrites);
+    currentRuns = [...currentRuns, ...newRuns];
+
+    try {
+      await whatsappBridgeFetch('/api/blast', {
+        method: 'POST',
+        body: JSON.stringify({
+          shopId: shop.shopId,
+          recipients: batch.map((item) => ({
+            id: `${item.automationId}-${item.customerId}`,
+            name: item.name,
+            phone: item.phone,
+            message: item.message,
+          })),
+          message: batch[0]?.message || '',
+          campaignName: `Scheduled Customer Automations · Batch ${batchNumber}`,
+          consentConfirmed: true,
+          automation: true,
+          callbackUrl,
+          callbackSecret: AUTOMATION_CALLBACK_SECRET,
+          runToken,
+          delayMs: Number(process.env.WHATSAPP_AUTOMATION_DELAY_MS || 2000),
+        }),
+      });
+      queued += batch.length;
+    } catch (error) {
+      const failedRuns = newRuns.map((run) => ({
+        ...run,
+        status: 'failed',
+        failedAt: now.toISOString(),
+        failureReason: error.message || 'WhatsApp worker rejected the automation batch.',
+      }));
+      await commitWrites(
+        serviceAccount,
+        projectId,
+        failedRuns.map((run) =>
+          makeUpdateWrite(projectId, 'automationRuns', sha256(`${run.dedupeKey}|${run.triggeredAt}`), run),
+        ),
+      );
+      currentRuns = currentRuns.map((run) =>
+        run.runToken === runToken
+          ? failedRuns.find((failedRun) => failedRun.customerId === run.customerId && failedRun.automationId === run.automationId) || run
+          : run,
+      );
+      failed += batch.length;
+      console.error('Scheduled automation batch failed:', shop.shopId, batchNumber, error.message);
+    }
   }
 
-  const newRuns = eligible.map((item) => ({
-    automationId: item.automationId,
-    customerId: item.customerId,
-    triggeredAt: now.toISOString(),
-    status: 'queued',
-    dedupeKey: item.dedupeKey,
-    runToken,
-    messageText: item.message,
-  }));
-
-  const mergedRuns = [...automationRuns, ...newRuns];
-  const writes = [
-    ...newRuns.map((run) => makeUpdateWrite(projectId, 'automationRuns', sha256(`${run.dedupeKey}|${run.triggeredAt}`), run)),
-    ...automations.map((auto) => makeUpdateWrite(projectId, 'automations', auto.__docId || auto.id, automationStatsFor(auto, mergedRuns))),
+  const summaryAutomations = automations.map((auto) => automationStatsFor(auto, currentRuns));
+  await commitWrites(serviceAccount, projectId, [
+    ...summaryAutomations.map((auto) =>
+      makeUpdateWrite(projectId, 'automations', auto.__docId || auto.id, auto),
+    ),
     makeUpdateWrite(projectId, 'automationScheduler', 'current', {
-      ...schedule,
-      lastRunDate: dayKey,
-      lastRunAt: now.toISOString(),
-      lastRunStatus: 'success',
-      lastRunSummary: { eligible: eligible.length, queued: eligible.length, failed: 0 },
+      ...baseSchedule,
+      lastRunStatus: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
+      lastRunSummary: {
+        eligible: eligible.length,
+        queued,
+        failed,
+      },
     }),
-  ];
-  await commitWrites(serviceAccount, projectId, writes);
+  ]);
 
-  return { shopId: shop.shopId, status: 'success', eligible: eligible.length, queued: eligible.length, failed: 0, skippedNoConsent };
+  return {
+    shopId: shop.shopId,
+    status: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
+    eligible: eligible.length,
+    queued,
+    failed,
+    skippedNoConsent,
+    batchSize,
+    batches: Math.ceil(eligible.length / batchSize),
+  };
 }
-
 async function getShopAutomationScheduler(shop) {
   const { serviceAccount, projectId } = await getShopFirebase(shop);
   const docs = await listDocuments(serviceAccount, projectId, 'automationScheduler');
@@ -817,14 +879,19 @@ async function processAutomationBlastResult(payload) {
   const mergedAutomations = automations.map((auto) => automationStatsFor(auto, updatedRuns));
   const schedule = normalizeAutomationSchedule((await getShopAutomationScheduler(shop)) || {});
   const currentRunDay = schedule.lastRunDate;
+  const dayRuns = updatedRuns.filter((run) => !currentRunDay || run.runDay === currentRunDay);
+  const dayFailed = dayRuns.filter((run) => run.status === 'failed');
+  const dayQueued = dayRuns.filter((run) => run.status === 'queued');
   const updatedSchedule = {
     ...schedule,
     lastRunAt: now,
-    lastRunStatus: callbackStatus,
+    lastRunStatus: dayFailed.length > 0
+      ? (dayQueued.length > 0 || dayRuns.some((run) => run.status === 'sent') ? 'partial' : 'failed')
+      : 'success',
     lastRunSummary: {
-      eligible: callbackResults.length,
-      queued: callbackResults.filter((run) => run.status === 'queued').length,
-      failed: failedRuns.length,
+      eligible: dayRuns.length,
+      queued: dayQueued.length,
+      failed: dayFailed.length,
     },
     lastRunDate: currentRunDay,
   };
