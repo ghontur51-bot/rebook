@@ -1,10 +1,11 @@
 {
-  "description": "ReBook empowers small salons to automatically re-engage inactive customers, streamline bookings, and boost repeat business through intuitive automation and analytics.",
+  "title": "ReBook — Salon Management & Retention SaaS",
+  "description": "ReBook is cloud-based salon management software for customers, bookings, staff, retention workflows, campaigns and analytics.",
   "robots": {
-    "index": false
+    "index": true
   },
   "accessibility": {
-    "addBypassLinks": false,
+    "addBypassLinks": true,
     "ignoreReducedMotion": false
   }
 }
