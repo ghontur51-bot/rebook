@@ -33,7 +33,8 @@ const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
 const WHATSAPP_BRIDGE_BASE_URL = String(process.env.WHATSAPP_BRIDGE_BASE_URL || '').replace(/\/$/, '');
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || '');
-const DEMO_WHATSAPP_PIN = String(process.env.DEMO_WHATSAPP_PIN || '');
+// Demo-only PIN. Kept server-side so the browser cannot invent or override it.
+const DEMO_WHATSAPP_PIN = '7439';
 const DEMO_WHATSAPP_SHOP_ID = String(process.env.DEMO_WHATSAPP_SHOP_ID || 'demo_whatsapp_test');
 const AUTOMATION_CALLBACK_SECRET = String(process.env.AUTOMATION_CALLBACK_SECRET || '');
 
