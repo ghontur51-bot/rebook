@@ -11,6 +11,15 @@ const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
 const WORKER_VERSION = "2026-09-26-sandbox-v3";
+function errorText(value, fallback = "Unknown error.") {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value && typeof value === "object") {
+    if (typeof value.message === "string" && value.message.trim()) return value.message;
+    try { return JSON.stringify(value); } catch {}
+  }
+  return fallback;
+}
+
 function deriveInternalSecret(label) {
   const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
   if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
@@ -229,9 +238,15 @@ function extractShopId(pathname, options = {}) {
 
 async function getWorkerBaseUrl(shopId) {
   const sandbox = await getWhatsAppSandbox(shopId);
-  // A persistent sandbox may be stopped after its session timeout. Any command
-  // automatically resumes it, which also runs the onResume hook to restart the worker.
+  // A persistent sandbox can already exist and still be running without firing
+  // onCreate/onResume for this request. Make sure the current worker/bootstrap
+  // files exist and restart provisioning when the worker is not healthy.
   await sandbox.runCommand("true", []);
+  if (!(await isWorkerHealthy(sandbox))) {
+    await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
+    await writeWorkerFiles(sandbox);
+    await launchBootstrapIfNeeded(sandbox);
+  }
   return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
 }
 
@@ -261,7 +276,9 @@ async function sandboxWorkerFetch(pathname, options = {}) {
     }
 
     if (!response.ok) {
-      const error = new Error(body.error || ("WhatsApp Sandbox worker request failed (" + response.status + ")."));
+      const error = new Error(
+        errorText(body.error, "WhatsApp Sandbox worker request failed (" + response.status + ").")
+      );
       error.status = response.status >= 500 ? 503 : response.status;
       throw error;
     }
