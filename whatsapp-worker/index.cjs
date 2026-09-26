@@ -133,7 +133,7 @@ async function initializeBrowserPreflight() {
 
   const browser = await puppeteer.launch({
     executablePath,
-    headless: "shell",
+    headless: true,
     timeout: 45000,
     args: [
       "--no-sandbox",
@@ -175,7 +175,7 @@ async function initializeSession(shopId) {
       authStrategy: new LocalAuth({ clientId: shopId, dataPath: SESSION_DIR }),
       puppeteer: {
         executablePath,
-        headless: "shell",
+        headless: true,
         timeout: 120000,
         protocolTimeout: 120000,
         args: [

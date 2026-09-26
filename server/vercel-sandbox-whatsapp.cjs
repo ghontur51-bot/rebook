@@ -68,6 +68,59 @@ function readWorkerSource() {
   };
 }
 
+async function ensureChromeSystemDependencies(sandbox) {
+  const markerPath = path.posix.join(DATA_DIR, ".chrome-system-deps-ready");
+  const libraryCheck = await commandSucceeded(
+    sandbox,
+    "sh",
+    ["-lc", "ldconfig -p >/dev/null 2>&1 && ldconfig -p | grep -q 'libnss3.so' && ldconfig -p | grep -q 'libatk-1.0.so' && ldconfig -p | grep -q 'libgtk-3.so'"],
+    { cwd: WORKER_DIR }
+  );
+  if (libraryCheck) return;
+
+  const install = await sandbox.runCommand({
+    cmd: "dnf",
+    args: [
+      "install", "-y", "--setopt=install_weak_deps=False",
+      "ca-certificates",
+      "nss",
+      "atk",
+      "at-spi2-atk",
+      "gtk3",
+      "cups-libs",
+      "libXcomposite",
+      "libXdamage",
+      "libXrandr",
+      "libXScrnSaver",
+      "libXi",
+      "libXtst",
+      "pango",
+      "alsa-lib",
+      "libdrm",
+      "mesa-libgbm",
+      "libxkbcommon",
+      "fontconfig",
+      "freetype",
+      "harfbuzz",
+      "cairo",
+      "dbus-libs",
+    ],
+    cwd: WORKER_DIR,
+    sudo: true,
+  });
+
+  if (install.exitCode !== 0) {
+    const stderr = await install.stderr().catch(() => "");
+    throw new Error("Chromium system dependencies could not be installed: " + String(stderr).slice(-1200));
+  }
+
+  await sandbox.runCommand({
+    cmd: "touch",
+    args: [markerPath],
+    cwd: WORKER_DIR,
+  });
+}
+
 async function commandSucceeded(sandbox, cmd, args, options = {}) {
   const result = await sandbox.runCommand({ cmd, args, ...options });
   return result.exitCode === 0;
@@ -161,12 +214,14 @@ async function createOrResumeSandbox(shopId) {
     onCreate: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
+      await ensureChromeSystemDependencies(sandbox);
       const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
       await startWorker(sandbox, dependenciesReady);
     },
     onResume: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
+      await ensureChromeSystemDependencies(sandbox);
       const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
       await startWorker(sandbox, dependenciesReady);
     },
