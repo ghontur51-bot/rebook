@@ -172,10 +172,10 @@ export default function Settings() {
             <span style={{ fontSize: 22 }}>📱</span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                WhatsApp Web Automation Bridge (Zero API Keys)
+                WhatsApp Web Automation Bridge (Local)
               </div>
               <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-                Enables automated background blast without paid Meta API keys
+                Provides local WhatsApp Web sending for opted-in customers
               </div>
             </div>
           </div>
@@ -199,9 +199,9 @@ export default function Settings() {
             How it works:
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--muted-foreground)", lineHeight: 1.6 }}>
-            <li>Runs locally on your machine with <strong>NO paid Meta API keys</strong>.</li>
+            <li>Runs locally on your machine and requires the WhatsApp Web session to remain available.</li>
             <li>Connects directly to your regular WhatsApp Web session.</li>
-            <li>Clicking <strong>Start Blast</strong> in Campaigns dispatches sequentially with 0 manual typing.</li>
+            <li>Campaigns only include customers with an explicit WhatsApp opt-in. Each message is submitted one at a time.</li>
           </ul>
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
