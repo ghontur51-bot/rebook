@@ -283,8 +283,10 @@ export interface AutomationRun {
   status: "queued" | "sent" | "recorded" | "failed";
   dedupeKey: string;
   triggerBookingId?: number;
+  sentAt?: string;
   convertedAt?: string;
   bookingId?: number;
+  messageText?: string;
 }
 
 // A conversion is attributed only to the latest successful automation run for that
@@ -1376,8 +1378,8 @@ function checkAutomationConversions(
       if (run.customerId !== customerId) return false;
       if (run.bookingId !== undefined) return false;
       if (run.triggerBookingId === bookingId) return false;
-      if (run.status !== "queued" && run.status !== "sent" && run.status !== "recorded") return false;
-      const triggerTime = new Date(run.triggeredAt).getTime();
+      if (run.status !== "sent" && run.status !== "recorded") return false;
+      const triggerTime = new Date(run.sentAt || run.triggeredAt).getTime();
       if (!Number.isFinite(triggerTime) || triggerTime > bookingTime) return false;
       const diffDays = (bookingTime - triggerTime) / 86400000;
       return diffDays >= 0 && diffDays <= AUTOMATION_CONVERSION_WINDOW_DAYS;
