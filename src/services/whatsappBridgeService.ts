@@ -118,8 +118,16 @@ export async function getBridgeStatus(forceFresh = false): Promise<BridgeStatus>
 }
 
 export async function connectBridgeSession(): Promise<{ success: boolean; error?: string }> {
-  try { await bridgeRequest('/connect', { method: 'POST', body: '{}' }); return { success: true }; }
-  catch (error: any) { return { success: false, error: error?.message || 'Unable to start WhatsApp session.' }; }
+  try {
+    await bridgeRequest('/connect', {
+      method: 'POST',
+      body: '{}',
+      signal: AbortSignal.timeout(55000),
+    });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Unable to start WhatsApp session.' };
+  }
 }
 
 export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {

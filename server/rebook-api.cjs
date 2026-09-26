@@ -419,6 +419,14 @@ function checkDemoPinRateLimit(ip) {
 
 function requireDemoWhatsApp(req, res, next) {
   if (!DEMO_WHATSAPP_PIN) return res.status(404).json({ error: 'Demo WhatsApp testing is disabled.' });
+  const supplied = String(req.headers['x-demo-whatsapp-pin'] || '');
+  if (!supplied || !hashEqual(supplied, DEMO_WHATSAPP_PIN)) return res.status(401).json({ error: 'Invalid demo WhatsApp PIN.' });
+  res.set('Cache-Control', 'no-store');
+  next();
+}
+
+function requireDemoWhatsAppVerify(req, res, next) {
+  if (!DEMO_WHATSAPP_PIN) return res.status(404).json({ error: 'Demo WhatsApp testing is disabled.' });
   checkDemoPinRateLimit(req.ip);
   const supplied = String(req.headers['x-demo-whatsapp-pin'] || '');
   if (!supplied || !hashEqual(supplied, DEMO_WHATSAPP_PIN)) return res.status(401).json({ error: 'Invalid demo WhatsApp PIN.' });
@@ -1228,7 +1236,7 @@ app.post('/api/razorpay/webhook', async (req, res, next) => {
 });
 
 // WhatsApp worker proxy. The browser never talks directly to the Vercel Sandbox worker.
-app.get('/api/demo/whatsapp/verify', requireDemoWhatsApp, (_req, res) => {
+app.get('/api/demo/whatsapp/verify', requireDemoWhatsAppVerify, (_req, res) => {
   res.json({ success: true });
 });
 

@@ -51,3 +51,8 @@ Each real shop can use its own Firebase project. The backend stores encrypted se
 ## Important WhatsApp limitation
 
 whatsapp-web.js is an unofficial WhatsApp Web client, not Meta's official WhatsApp Business Platform. ReBook should treat Sandbox availability and WhatsApp session stability as operational dependencies and provide reset/reconnect controls.
+
+
+## WhatsApp status polling
+
+The demo PIN rate limiter applies only to PIN verification attempts. Status, connect, reset, disconnect, and blast requests use the already-verified PIN without consuming verification attempts. This prevents the 3.5-second status poll from locking the demo after a few minutes.
