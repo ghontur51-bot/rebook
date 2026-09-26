@@ -25,6 +25,10 @@ export interface Customer {
   tags: string[];
   notes: string;
   avatar: string;
+  /** Explicit WhatsApp messaging consent. Never inferred from having a phone number. */
+  whatsappOptIn?: boolean;
+  whatsappOptInAt?: string;
+  whatsappOptInSource?: string;
   /** System-controlled lifecycle; tags are not used as the source of truth. */
   lifecycle?: "New" | "Repeat";
 }
