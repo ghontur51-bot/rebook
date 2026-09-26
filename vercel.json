@@ -60,8 +60,14 @@
       "schedule": "0 0 * * *"
     }
   ],
-  "installCommand": "npm ci",
+  "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": "vite"
+  "framework": "vite",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60,
+      "includeFiles": "whatsapp-worker/**"
+    }
+  }
 }

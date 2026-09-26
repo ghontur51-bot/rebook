@@ -83,7 +83,7 @@ function WhatsAppBlastModal({
   const [showGuide, setShowGuide] = useState(false);
   const [currentSendingName, setCurrentSendingName] = useState<string>("");
   const [demoPin, setDemoPin] = useState("");
-  const [demoPinSaved, setDemoPinSaved] = useState(Boolean(getDemoWhatsAppPin()));
+  const [demoPinSaved, setDemoPinSaved] = useState(false);
   const completionRecorded = useRef(false);
   const blastIntervalRef = useRef<any>(null);
 
@@ -120,6 +120,19 @@ function WhatsAppBlastModal({
   // Poll bridge status smoothly without forcing re-renders if unchanged
   // AND NEVER auto-popup QR code without user intent!
   useEffect(() => {
+    if (window.location.pathname.replace(/\/+$/, "") === "/demo" && !demoPinSaved) {
+      setBridgeStatus({
+        online: false,
+        isReady: false,
+        hasQr: false,
+        qrDataUrl: null,
+        clientInfo: null,
+        connectionState: "PIN_REQUIRED",
+        initializationError: "Verify the demo PIN to connect the Vercel Sandbox worker.",
+      });
+      return;
+    }
+
     let mounted = true;
     const checkStatus = async () => {
       const status = await getBridgeStatus();
@@ -145,7 +158,7 @@ function WhatsAppBlastModal({
         clearInterval(blastIntervalRef.current);
       }
     };
-  }, [showQrModal]);
+  }, [showQrModal, demoPinSaved]);
 
   // A PIN saved in sessionStorage is only considered unlocked after the server verifies it.
   useEffect(() => {
@@ -155,7 +168,12 @@ function WhatsAppBlastModal({
 
     let mounted = true;
     verifyDemoWhatsAppPin(savedPin).then((result) => {
-      if (!mounted || result.success) return;
+      if (!mounted) return;
+      if (result.success) {
+        setDemoPinSaved(true);
+        setDemoPin(savedPin);
+        return;
+      }
       clearDemoWhatsAppPin();
       setDemoPin("");
       setDemoPinSaved(false);
@@ -422,7 +440,7 @@ function WhatsAppBlastModal({
                         setPopupData({
                           isOpen: true,
                           title: "Invalid Demo PIN",
-                          message: result.error || "That PIN is not valid. Enter the private demo PIN configured in Vercel.",
+                          message: result.error || "That PIN is not valid. Enter demo PIN 7439.",
                           type: "error"
                         });
                         return;
@@ -433,7 +451,7 @@ function WhatsAppBlastModal({
                       setPopupData({
                         isOpen: true,
                         title: "Demo WhatsApp unlocked",
-                        message: "PIN verified. You can now connect the demo WhatsApp session.",
+                        message: "PIN 7439 verified. You can now connect the demo WhatsApp Sandbox worker.",
                         type: "success"
                       });
                     }}
@@ -474,14 +492,14 @@ function WhatsAppBlastModal({
                       ? `WhatsApp Connected (${bridgeStatus.clientInfo?.name || "Linked Device"})`
                       : bridgeStatus.hasQr
                       ? "Pairing QR Code Ready"
-                      : "WhatsApp Cloud Worker"}
+                      : "Vercel Sandbox Worker"}
                   </div>
                   <div style={{ color: "var(--muted-foreground)", fontSize: 11, marginTop: 1 }}>
                     {bridgeStatus.isReady
-                      ? "Connected. Messages are dispatched by the persistent cloud worker."
+                      ? "Connected. Messages are dispatched by the persistent Vercel Sandbox worker."
                       : bridgeStatus.hasQr
                       ? "The QR is ready. Scan it with WhatsApp → Linked Devices."
-                      : "Click Connect to start or resume your cloud WhatsApp session."}
+                      : "Click Connect to start or resume the Vercel Sandbox WhatsApp session."}
                   </div>
                 </div>
               </div>
@@ -492,14 +510,16 @@ function WhatsAppBlastModal({
                   <button
                     onClick={async () => {
                       if (window.location.pathname.replace(/\/+$/, "") === "/demo" && !demoPinSaved) {
-                        setPopupData({ isOpen: true, title: "Demo WhatsApp PIN required", message: "Enter the private demo PIN in the field above before connecting your WhatsApp.", type: "warning" });
+                        setPopupData({ isOpen: true, title: "Demo WhatsApp PIN required", message: "Verify demo PIN 7439 before connecting the Vercel Sandbox WhatsApp worker.", type: "warning" });
+                        return;
+                      }
+                      const result = await connectBridgeSession();
+                      if (!result.success) {
+                        setShowQrModal(false);
+                        setPopupData({ isOpen: true, title: "Vercel Sandbox WhatsApp Connection", message: result.error || "Unable to start the Vercel Sandbox WhatsApp session.", type: "error" });
                         return;
                       }
                       setShowQrModal(true);
-                      const result = await connectBridgeSession();
-                      if (!result.success) {
-                        setPopupData({ isOpen: true, title: "WhatsApp Connection", message: result.error || "Unable to start the WhatsApp session.", type: "error" });
-                      }
                     }}
                     style={{
                       background: "linear-gradient(135deg, #25D366, #128C7E)",
@@ -583,7 +603,7 @@ function WhatsAppBlastModal({
                   <div style={{ padding: "30px 20px", background: "rgba(255,255,255,0.6)", borderRadius: 12, maxWidth: 300, margin: "0 auto" }}>
                     <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>Generating fresh pairing code...</div>
-                    <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>Make sure local bridge is running via <code>npm run wa-bridge</code></div>
+                    <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>The Vercel Sandbox worker is starting automatically. No local Node.js process is required.</div>
                   </div>
                 )}
 
@@ -597,13 +617,13 @@ function WhatsAppBlastModal({
             {showGuide && (
               <div style={{ background: "#F1F5F9", border: "1px solid #CBD5E1", borderRadius: 12, padding: 16, marginBottom: 16, fontSize: 12 }}>
                 <div style={{ fontWeight: 700, color: "#1E293B", marginBottom: 8, fontSize: 13 }}>
-                  How to Run WhatsApp Web Bridge (Port 5001):
+                  How ReBook WhatsApp Worker Works
                 </div>
                 <ol style={{ paddingLeft: 18, margin: "0 0 10px 0", color: "#334155", lineHeight: 1.7 }}>
-                  <li>Open your terminal in <code>d:\rebook2</code>.</li>
-                  <li>Run command: <code style={{ background: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontWeight: 700, color: "#0F172A" }}>npm run wa-bridge</code></li>
-                  <li>Click <strong>Connect to WhatsApp</strong> above to scan the QR code.</li>
-                  <li>Once connected, click <strong>Start WhatsApp Send</strong>!</li>
+                  <li>ReBook starts the WhatsApp worker in a persistent Vercel Sandbox.</li>
+                  <li>Click <strong>Connect to WhatsApp</strong> and wait for the QR code.</li>
+                  <li>Scan the QR code using WhatsApp → Linked Devices.</li>
+                  <li>Keep this ReBook workspace open while the worker is active.</li>
                 </ol>
                 <div style={{ fontSize: 11, color: "#64748B", background: "rgba(255,255,255,0.5)", padding: "6px 10px", borderRadius: 8 }}>
                   💡 <em>Zero paid Meta API keys required. Operates directly with regular WhatsApp Web.</em>
@@ -1070,7 +1090,7 @@ export default function Campaigns() {
                     <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Channel</label>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                       {[
-                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Opt-in required · local bridge" },
+                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Opt-in required · Vercel Sandbox" },
                         { id: "SMS", label: "SMS", icon: "💬", desc: "Reliable fallback" },
                         { id: "Email", label: "Email", icon: "✉️", desc: "Best for newsletters" },
                       ].map(ch => (

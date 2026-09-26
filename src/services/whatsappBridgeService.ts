@@ -1,5 +1,5 @@
 // ReBook WhatsApp service.
-// Production requests are proxied through the ReBook API to the persistent Oracle WhatsApp worker.
+// Production requests are proxied through the ReBook API to the persistent Vercel Sandbox WhatsApp worker.
 // The worker secret is never exposed to the browser.
 
 export interface BridgeStatus {

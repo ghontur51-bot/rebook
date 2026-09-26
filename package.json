@@ -8,10 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "format": "oxfmt",
-    "wa-bridge": "node server/whatsapp-bridge.cjs",
     "api": "node server/rebook-api.cjs",
-    "dev:notes": "node -e \"console.log('Start API: npm run api | Start frontend: npm run dev | Start WhatsApp: npm run wa-bridge')\"",
-    "check": "tsc --noEmit && node --check server/rebook-api.cjs && node --check server/whatsapp-bridge.cjs && node --check whatsapp-worker/index.cjs && node --check api/index.js"
+    "dev:notes": "node -e \"console.log('Start API: npm run api | Start frontend: npm run dev | WhatsApp runtime: Vercel Sandbox')\"",
+    "check": "tsc --noEmit && node --check server/rebook-api.cjs && node --check server/vercel-sandbox-whatsapp.cjs && node --check whatsapp-worker/index.cjs && node --check api/index.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
@@ -20,7 +19,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-is": "^19.3.0",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "@vercel/sandbox": "^3.5.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
