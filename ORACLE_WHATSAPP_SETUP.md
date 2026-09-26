@@ -69,11 +69,14 @@ curl http://127.0.0.1:5001/api/health
 Add these to the ReBook Vercel project:
 
 ```env
-WHATSAPP_BRIDGE_BASE_URL=http://YOUR_ORACLE_PUBLIC_IP:5001
+WHATSAPP_BRIDGE_BASE_URL=https://YOUR-WORKER-DOMAIN
 WHATSAPP_BRIDGE_SECRET=THE_SAME_SECRET_USED_ON_ORACLE
+AUTOMATION_CALLBACK_SECRET=YOUR_AUTOMATION_CALLBACK_SECRET
 ```
 
 For a hardened deployment, expose the worker through HTTPS and use that HTTPS URL instead of a raw IP.
+
+The worker needs the same `AUTOMATION_CALLBACK_SECRET` value as Vercel so the completed scheduled blast can securely report per-recipient success/failure back to ReBook. The secret never reaches browser JavaScript.
 
 The secret stays server-side. The browser only calls ReBook's own API:
 
@@ -98,7 +101,7 @@ For a real shop:
 
 ReBook asks the Oracle worker to start/resume the session for that shop. The worker stores the WhatsApp Web session under its persistent Docker volume. The first connection produces a QR and ReBook displays it. After successful pairing, later worker/VM restarts can restore the saved session.
 
-The public `/demo` route intentionally does **not** connect a real WhatsApp account.
+The public `/demo` route can connect a real WhatsApp account only when the server-side demo PIN is configured.
 
 ## Multi-tenant sessions
 
