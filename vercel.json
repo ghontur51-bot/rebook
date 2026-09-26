@@ -55,5 +55,9 @@
       "path": "/api/cron/billing",
       "schedule": "0 0 * * *"
     }
-  ]
+  ],
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite"
 }
