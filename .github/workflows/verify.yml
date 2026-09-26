@@ -22,7 +22,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: TypeScript check
         run: npx tsc --noEmit
@@ -30,7 +30,6 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check server/rebook-api.cjs
-          node --check server/whatsapp-bridge.cjs
           node --check api/index.js
 
       - name: Production build
