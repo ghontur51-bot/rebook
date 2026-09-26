@@ -62,6 +62,15 @@ const serviceAppCache = new Map();
 const adminLoginBuckets = new Map();
 const demoPinBuckets = new Map();
 
+function errorMessage(error, fallback = 'Internal server error.') {
+  const value = error?.message ?? error;
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value && typeof value === 'object') {
+    try { return JSON.stringify(value); } catch {}
+  }
+  return fallback;
+}
+
 function fail(status, message) {
   const error = new Error(message);
   error.status = status;
@@ -1400,8 +1409,9 @@ app.get('/api/cron/billing', async (req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
-  console.error('ReBook API error:', error.message);
-  res.status(error.status || 500).json({ error: error.message || 'Internal server error.' });
+  const message = errorMessage(error);
+  console.error('ReBook API error:', message, error);
+  res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: message });
 });
 
 if (require.main === module) {
