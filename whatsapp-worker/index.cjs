@@ -108,6 +108,7 @@ function getSession(shopId) {
       suppressedNumbers: loadSuppressed(id),
       recentSends: new Map(),
       activeBlast: freshBlast(),
+      pendingBlasts: [],
       initializationPromise: null,
     });
   }
@@ -336,8 +337,100 @@ function publicState(s) {
       sentCount: s.activeBlast.sentCount,
       failedCount: s.activeBlast.failedCount,
       currentIndex: s.activeBlast.currentIndex,
+      queuedBlasts: s.pendingBlasts.length,
     },
   };
+}
+
+
+async function executeBlast(shopId, s, blast) {
+  s.activeBlast = blast;
+
+  try {
+    const delayMs = Math.max(
+      1000,
+      Number(blast.delayMs || (blast.automation ? process.env.WHATSAPP_AUTOMATION_DELAY_MS : process.env.WHATSAPP_MANUAL_DELAY_MS) || (blast.automation ? 2000 : 5000)),
+    );
+
+    for (let index = 0; index < s.activeBlast.results.length; index += 1) {
+      if (s.activeBlast.cancelled) break;
+      const target = s.activeBlast.results[index];
+      s.activeBlast.currentIndex = index;
+      target.status = "sending";
+
+      try {
+        const result = await sendOne(shopId, target);
+        target.status = "sent";
+        target.messageId = result.messageId;
+        target.sentAt = new Date().toISOString();
+        s.activeBlast.sentCount += 1;
+      } catch (error) {
+        target.status = "failed";
+        target.error = error.message || "Unable to send.";
+        s.activeBlast.failedCount += 1;
+      }
+
+      if (index < s.activeBlast.results.length - 1 && !s.activeBlast.cancelled) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  } catch (error) {
+    console.error("Blast worker error:", shopId, error);
+    for (const result of s.activeBlast.results) {
+      if (result.status === "pending" || result.status === "sending") {
+        result.status = "failed";
+        result.error = error.message || "Blast worker error.";
+      }
+    }
+    s.activeBlast.failedCount = s.activeBlast.results.filter((result) => result.status === "failed").length;
+  } finally {
+    s.activeBlast.isRunning = false;
+    s.activeBlast.currentIndex = -1;
+
+    const completedBlast = s.activeBlast;
+    if (completedBlast.automation) {
+      await notifyAutomationCallback(completedBlast);
+    }
+
+    const next = s.pendingBlasts.shift();
+    if (next) {
+      if (s.isReady && s.client) {
+        void executeBlast(shopId, s, next);
+      } else {
+        next.cancelled = true;
+        next.results.forEach((result) => {
+          result.status = "failed";
+          result.error = "WhatsApp session disconnected before this queued campaign started.";
+        });
+        await notifyAutomationCallback(next);
+        s.activeBlast = freshBlast();
+        if (s.pendingBlasts.length) {
+          // Continue draining the queue only when the session becomes ready again.
+          return;
+        }
+      }
+    } else {
+      s.activeBlast = freshBlast();
+    }
+  }
+}
+
+async function cancelPendingBlasts(s, reason) {
+  const pending = s.pendingBlasts.splice(0);
+  for (const blast of pending) {
+    blast.cancelled = true;
+    blast.isRunning = false;
+    blast.currentIndex = -1;
+    for (const result of blast.results) {
+      if (result.status === "pending" || result.status === "sending") {
+        result.status = "failed";
+        result.error = reason;
+      }
+    }
+    if (blast.automation) {
+      await notifyAutomationCallback(blast);
+    }
+  }
 }
 
 app.get("/api/health", (_req, res) => {
@@ -377,8 +470,9 @@ app.post("/api/send-single", async (req, res) => {
 
 app.post("/api/blast", async (req, res) => {
   try {
-    const { shopId, recipients, message, campaignName, consentConfirmed, automation, callbackUrl, callbackSecret, runToken } = req.body || {};
+    const { shopId, recipients, message, campaignName, consentConfirmed, automation, callbackUrl, callbackSecret, runToken, delayMs } = req.body || {};
     assertConsent(consentConfirmed);
+
     if (automation === true) {
       if (!callbackUrl || !callbackSecret || !runToken) throw new Error("Automation callback configuration is incomplete.");
       try {
@@ -388,19 +482,19 @@ app.post("/api/blast", async (req, res) => {
         throw new Error("Automation callback URL is invalid.");
       }
     }
+
     const s = await getSessionReady(shopId);
     if (!s.isReady) throw new Error("WhatsApp is not connected. Scan the QR code first.");
     if (!Array.isArray(recipients) || recipients.length === 0) throw new Error("Recipients list is required.");
 
     const automationMax = Math.max(
       MAX_RECIPIENTS_PER_BLAST,
-      Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 500), 500),
+      Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 150), 500),
     );
     const maxRecipients = automation === true ? automationMax : MAX_RECIPIENTS_PER_BLAST;
     if (recipients.length > maxRecipients) {
       throw new Error(`This worker allows at most ${maxRecipients} recipients per campaign.`);
     }
-    if (s.activeBlast.isRunning) return res.status(409).json({ error: "A WhatsApp campaign is already running for this shop." });
 
     const seen = new Set();
     const queue = recipients.map((recipient, index) => {
@@ -419,7 +513,7 @@ app.post("/api/blast", async (req, res) => {
 
     if (!queue.length) throw new Error("No eligible recipients remain after WhatsApp opt-out filtering.");
 
-    s.activeBlast = {
+    const blast = {
       isRunning: true,
       campaignName: String(campaignName || "WhatsApp Campaign"),
       total: queue.length,
@@ -432,44 +526,26 @@ app.post("/api/blast", async (req, res) => {
       callbackUrl: automation === true ? String(callbackUrl) : null,
       callbackSecret: automation === true ? String(callbackSecret) : null,
       runToken: automation === true ? String(runToken) : null,
+      delayMs: Number(delayMs || 0) || null,
       shopId,
     };
 
-    res.json({ success: true, total: queue.length });
-
-    (async () => {
-      for (let index = 0; index < s.activeBlast.results.length; index += 1) {
-        if (s.activeBlast.cancelled) break;
-        const target = s.activeBlast.results[index];
-        s.activeBlast.currentIndex = index;
-        target.status = "sending";
-
-        try {
-          const result = await sendOne(shopId, target);
-          target.status = "sent";
-          target.messageId = result.messageId;
-          target.sentAt = new Date().toISOString();
-          s.activeBlast.sentCount += 1;
-        } catch (error) {
-          target.status = "failed";
-          target.error = error.message || "Unable to send.";
-          s.activeBlast.failedCount += 1;
-        }
-
-        if (index < s.activeBlast.results.length - 1 && !s.activeBlast.cancelled) {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        }
+    if (s.activeBlast.isRunning) {
+      if (automation !== true) {
+        return res.status(409).json({ error: "A WhatsApp campaign is already running for this shop." });
       }
 
-      s.activeBlast.isRunning = false;
-      s.activeBlast.currentIndex = -1;
-      await notifyAutomationCallback(s.activeBlast);
-    })().catch(async (error) => {
-      s.activeBlast.isRunning = false;
-      s.activeBlast.currentIndex = -1;
-      if (s.activeBlast.automation) await notifyAutomationCallback(s.activeBlast);
-      console.error("Blast worker error:", shopId, error);
-    });
+      s.pendingBlasts.push(blast);
+      return res.json({
+        success: true,
+        total: queue.length,
+        queued: true,
+        queuePosition: s.pendingBlasts.length,
+      });
+    }
+
+    res.json({ success: true, total: queue.length, queued: false });
+    void executeBlast(shopId, s, blast);
   } catch (error) {
     res.status(400).json({ error: error.message || "Unable to start campaign." });
   }
@@ -488,6 +564,7 @@ app.post("/api/blast/cancel", async (req, res) => {
   try {
     const s = getSession(safeShopId(req.body?.shopId));
     s.activeBlast.cancelled = true;
+    await cancelPendingBlasts(s, "Campaign cancelled before this queued batch started.");
     res.json({ success: true });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message || "Unable to cancel campaign." });
@@ -499,6 +576,7 @@ app.post("/api/reset", async (req, res) => {
     const shopId = safeShopId(req.body?.shopId);
     const s = getSession(shopId);
     s.activeBlast.cancelled = true;
+    await cancelPendingBlasts(s, "WhatsApp session was reset before this queued batch started.");
 
     if (s.client) {
       try { await s.client.logout(); } catch (_) {}
@@ -520,6 +598,7 @@ app.post("/api/disconnect", async (req, res) => {
     const shopId = safeShopId(req.body?.shopId);
     const s = getSession(shopId);
     s.activeBlast.cancelled = true;
+    await cancelPendingBlasts(s, "WhatsApp session disconnected before this queued batch started.");
 
     if (s.client) {
       try { await s.client.logout(); } catch (_) {}
