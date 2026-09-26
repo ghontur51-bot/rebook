@@ -11,7 +11,7 @@
     "wa-bridge": "node server/whatsapp-bridge.cjs",
     "api": "node server/rebook-api.cjs",
     "dev:notes": "node -e \"console.log('Start API: npm run api | Start frontend: npm run dev | Start WhatsApp: npm run wa-bridge')\"",
-    "check": "tsc --noEmit && node --check server/rebook-api.cjs && node --check server/whatsapp-bridge.cjs && node --check api/index.js"
+    "check": "tsc --noEmit && node --check server/rebook-api.cjs && node --check server/whatsapp-bridge.cjs && node --check whatsapp-worker/index.cjs && node --check api/index.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
@@ -37,7 +37,5 @@
     "node": "22.x"
   },
   "packageManager": "npm@11.6.2",
-  "optionalDependencies": {
-    "whatsapp-web.js": "^1.34.7"
-  }
+  "optionalDependencies": {}
 }
