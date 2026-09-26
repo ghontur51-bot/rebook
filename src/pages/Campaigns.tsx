@@ -214,7 +214,7 @@ function WhatsAppBlastModal({
       setPopupData({
         isOpen: true,
         title: "WhatsApp Bridge is offline",
-        message: "Simulation is disabled in production mode. Start the local bridge with 'npm run wa-bridge' and connect WhatsApp before sending.",
+        message: "Connect WhatsApp from this shop. The cloud worker will start or resume the persistent WhatsApp session.",
         type: "error"
       });
       return;
@@ -401,7 +401,7 @@ function WhatsAppBlastModal({
                       ? "Zero keypresses needed. Messages are dispatched directly via your session."
                       : bridgeStatus.hasQr
                       ? "Click 'Connect to WhatsApp' below to view and scan the QR code."
-                      : "Start the local bridge with 'npm run wa-bridge', then scan the pairing QR. Simulation is disabled for real campaigns."}
+                      : "The ReBook cloud worker manages this WhatsApp session. Scan the pairing QR shown here once; no customer computer setup is required."}
                   </div>
                 </div>
               </div>
