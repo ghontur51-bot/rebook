@@ -51,6 +51,7 @@ const SHOP_COLLECTIONS = [
 const tokenCache = new Map();
 const serviceAppCache = new Map();
 const adminLoginBuckets = new Map();
+const demoPinBuckets = new Map();
 
 function fail(status, message) {
   const error = new Error(message);
@@ -385,13 +386,34 @@ function hashEqual(a, b) {
 }
 
 async function whatsappBridgeFetch(pathname, options = {}) {
-  return sandboxWorkerFetch(pathname, options);
+  try {
+    return await sandboxWorkerFetch(pathname, options);
+  } catch (error) {
+    if (!error?.status) error.status = 503;
+    throw error;
+  }
+}
+
+function checkDemoPinRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const maxAttempts = 10;
+  const key = String(ip || 'unknown');
+  const existing = demoPinBuckets.get(key);
+  const bucket = existing && now - existing.windowStart < windowMs
+    ? existing
+    : { windowStart: now, count: 0 };
+  bucket.count += 1;
+  demoPinBuckets.set(key, bucket);
+  if (bucket.count > maxAttempts) fail(429, 'Too many demo PIN attempts. Please try again later.');
 }
 
 function requireDemoWhatsApp(req, res, next) {
   if (!DEMO_WHATSAPP_PIN) return res.status(404).json({ error: 'Demo WhatsApp testing is disabled.' });
+  checkDemoPinRateLimit(req.ip);
   const supplied = String(req.headers['x-demo-whatsapp-pin'] || '');
-  if (!supplied || supplied !== DEMO_WHATSAPP_PIN) return res.status(401).json({ error: 'Invalid demo WhatsApp PIN.' });
+  if (!supplied || !hashEqual(supplied, DEMO_WHATSAPP_PIN)) return res.status(401).json({ error: 'Invalid demo WhatsApp PIN.' });
+  res.set('Cache-Control', 'no-store');
   next();
 }
 
@@ -625,7 +647,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   const dayKey = dateKeyFromParts(localNow);
 
   if (!schedule.enabled) return { shopId: shop.shopId, status: 'disabled', eligible: 0, queued: 0, failed: 0 };
-  if (localNow.hour !== schedule.runHour) return { shopId: shop.shopId, status: 'not-due', eligible: 0, queued: 0, failed: 0 };
+  if (localNow.hour < schedule.runHour) return { shopId: shop.shopId, status: 'not-due', eligible: 0, queued: 0, failed: 0 };
   if (schedule.lastRunDate === dayKey) return { shopId: shop.shopId, status: 'already-ran', eligible: 0, queued: 0, failed: 0 };
 
   const { serviceAccount, projectId } = await getShopFirebase(shop);
@@ -1010,7 +1032,13 @@ async function processWebhook(payload, signature) {
 }
 
 // --- Core routes ---
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'rebook-api' }));
+app.get('/api/health', (_req, res) => res.json({
+  ok: true,
+  service: 'rebook-api',
+  whatsappRuntime: '@vercel/sandbox',
+  scheduledAutomations: true,
+  billingCron: true,
+}));
 
 app.post('/api/admin/login', (req, res, next) => {
   try {
