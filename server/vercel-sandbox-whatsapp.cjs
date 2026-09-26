@@ -238,15 +238,20 @@ function extractShopId(pathname, options = {}) {
 
 async function getWorkerBaseUrl(shopId) {
   const sandbox = await getWhatsAppSandbox(shopId);
-  // A persistent sandbox can already exist and still be running without firing
-  // onCreate/onResume for this request. Make sure the current worker/bootstrap
-  // files exist and restart provisioning when the worker is not healthy.
+
+  // A persistent sandbox may be running while its port-5001 worker is still
+  // provisioning. Never call sandbox.domain(5001) until the process is actually
+  // listening; Vercel throws "This sandbox is not listening on the requested port"
+  // otherwise, which used to turn a normal cold start into a hard connection error.
   await sandbox.runCommand("true", []);
+
   if (!(await isWorkerHealthy(sandbox))) {
     await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
     await writeWorkerFiles(sandbox);
     await launchBootstrapIfNeeded(sandbox);
+    return null;
   }
+
   return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
 }
 
@@ -257,6 +262,26 @@ async function sandboxWorkerFetch(pathname, options = {}) {
   try {
     const shopId = extractShopId(pathname, options);
     const baseUrl = await getWorkerBaseUrl(shopId);
+
+    if (!baseUrl) {
+      const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
+      if (isStatusOrConnect) {
+        return {
+          success: true,
+          online: true,
+          isReady: false,
+          hasQr: false,
+          qrDataUrl: null,
+          clientInfo: null,
+          connectionState: "PROVISIONING",
+          initializationError: null,
+        };
+      }
+      const provisioningError = new Error("WhatsApp worker is still starting. Please retry in a few seconds.");
+      provisioningError.status = 503;
+      throw provisioningError;
+    }
+
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", "Bearer " + deriveInternalSecret("rebook-whatsapp-bridge"));
     headers.set("Content-Type", "application/json");
