@@ -172,7 +172,7 @@ export default function Settings() {
             <span style={{ fontSize: 22 }}>📱</span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                WhatsApp Web Automation Bridge (Local)
+                WhatsApp Web Automation Bridge (Cloud)
               </div>
               <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                 Provides local WhatsApp Web sending for opted-in customers
@@ -199,7 +199,7 @@ export default function Settings() {
             How it works:
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--muted-foreground)", lineHeight: 1.6 }}>
-            <li>Runs locally on your machine and requires the WhatsApp Web session to remain available.</li>
+            <li>Runs on ReBook's persistent cloud worker. End-user computers do not need Node.js, npm, or a terminal.</li>
             <li>Connects directly to your regular WhatsApp Web session.</li>
             <li>Campaigns only include customers with an explicit WhatsApp opt-in. Each message is submitted one at a time.</li>
           </ul>
