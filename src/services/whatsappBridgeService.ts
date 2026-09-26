@@ -21,8 +21,18 @@ export interface BlastProgressResponse { isRunning: boolean; campaignName: strin
 function getContext(): { mode: 'shop' | 'demo'; shopId?: string; accessToken?: string } | null {
   const parts = window.location.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
   if (parts[0] === 'demo') return { mode: 'demo' };
-  if (parts[0] !== 'shop' || !parts[1] || !parts[2]) return null;
-  return { mode: 'shop', shopId: decodeURIComponent(parts[1]), accessToken: decodeURIComponent(parts[2]) };
+  if (parts[0] !== 'shop' || !parts[1]) return null;
+  const shopId = decodeURIComponent(parts[1]);
+  let accessToken = parts[2] ? decodeURIComponent(parts[2]) : '';
+  if (!accessToken) {
+    try {
+      accessToken = sessionStorage.getItem(`rebook_shop_access_${shopId}`) || '';
+    } catch {
+      accessToken = '';
+    }
+  }
+  if (!accessToken) return null;
+  return { mode: 'shop', shopId, accessToken };
 }
 
 export function getDemoWhatsAppPin(): string {
