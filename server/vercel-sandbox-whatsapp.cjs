@@ -221,6 +221,7 @@ async function createOrResumeSandbox(shopId) {
     onResume: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
+      await ensureChromeSystemDependencies(sandbox);
       const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
       await startWorker(sandbox, dependenciesReady);
     },
