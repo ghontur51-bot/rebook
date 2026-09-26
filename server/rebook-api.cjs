@@ -8,6 +8,8 @@ try {
   if (typeof process.loadEnvFile === 'function') process.loadEnvFile();
 } catch (_) {}
 
+const { sandboxWorkerFetch } = require('./vercel-sandbox-whatsapp.cjs');
+
 const app = express();
 const allowedOrigins = String(process.env.REBOOK_ALLOWED_ORIGINS || '')
   .split(',')
@@ -31,7 +33,6 @@ const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
-const WHATSAPP_BRIDGE_BASE_URL = String(process.env.WHATSAPP_BRIDGE_BASE_URL || '').replace(/\/$/, '');
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || '');
 // Demo-only PIN. Kept server-side so the browser cannot invent or override it.
 const DEMO_WHATSAPP_PIN = '7439';
@@ -384,31 +385,7 @@ function hashEqual(a, b) {
 }
 
 async function whatsappBridgeFetch(pathname, options = {}) {
-  if (!WHATSAPP_BRIDGE_BASE_URL || !WHATSAPP_BRIDGE_SECRET) {
-    fail(503, 'WhatsApp worker is not configured.');
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BRIDGE_TIMEOUT_MS || 12000));
-  try {
-    const headers = new Headers(options.headers || {});
-    headers.set('Authorization', `Bearer ${WHATSAPP_BRIDGE_SECRET}`);
-    headers.set('Content-Type', 'application/json');
-    const response = await fetch(`${WHATSAPP_BRIDGE_BASE_URL}${pathname}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    });
-    const bodyText = await response.text();
-    let body = {};
-    try { body = bodyText ? JSON.parse(bodyText) : {}; } catch { body = { error: bodyText || 'Invalid worker response.' }; }
-    if (!response.ok) fail(response.status >= 500 ? 503 : response.status, body.error || 'WhatsApp worker request failed.');
-    return body;
-  } catch (error) {
-    if (error.name === 'AbortError') fail(504, 'WhatsApp worker request timed out.');
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return sandboxWorkerFetch(pathname, options);
 }
 
 function requireDemoWhatsApp(req, res, next) {
@@ -1146,7 +1123,7 @@ app.post('/api/razorpay/webhook', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// WhatsApp worker proxy. The browser never talks directly to Oracle.
+// WhatsApp worker proxy. The browser never talks directly to the Vercel Sandbox worker.
 app.get('/api/demo/whatsapp/verify', requireDemoWhatsApp, (_req, res) => {
   res.json({ success: true });
 });
