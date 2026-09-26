@@ -33,11 +33,9 @@ const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
-const WHATSAPP_BRIDGE_SECRET = WHATSAPP_INTERNAL_SECRET;
 // Demo-only PIN. Kept server-side so the browser cannot invent or override it.
 const DEMO_WHATSAPP_PIN = '7439';
 const DEMO_WHATSAPP_SHOP_ID = String(process.env.DEMO_WHATSAPP_SHOP_ID || 'demo_whatsapp_test');
-const AUTOMATION_CALLBACK_SECRET = AUTOMATION_INTERNAL_CALLBACK_SECRET;
 function deriveInternalSecret(label) {
   const seed = String(MASTER_ENCRYPTION_KEY || ADMIN_SESSION_SECRET || '').trim();
   if (!seed) fail(500, 'MASTER_ENCRYPTION_KEY is not configured.');
@@ -46,6 +44,8 @@ function deriveInternalSecret(label) {
 
 const WHATSAPP_INTERNAL_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || deriveInternalSecret('rebook-whatsapp-bridge'));
 const AUTOMATION_INTERNAL_CALLBACK_SECRET = String(process.env.AUTOMATION_CALLBACK_SECRET || deriveInternalSecret('rebook-automation-callback'));
+const WHATSAPP_BRIDGE_SECRET = WHATSAPP_INTERNAL_SECRET;
+const AUTOMATION_CALLBACK_SECRET = AUTOMATION_INTERNAL_CALLBACK_SECRET;
 
 
 const CENTRAL_SERVICE_ACCOUNT_JSON = process.env.CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON || '';
