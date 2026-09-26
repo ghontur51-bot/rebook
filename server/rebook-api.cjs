@@ -35,6 +35,7 @@ const WHATSAPP_BRIDGE_BASE_URL = String(process.env.WHATSAPP_BRIDGE_BASE_URL || 
 const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || '');
 const DEMO_WHATSAPP_PIN = String(process.env.DEMO_WHATSAPP_PIN || '');
 const DEMO_WHATSAPP_SHOP_ID = String(process.env.DEMO_WHATSAPP_SHOP_ID || 'demo_whatsapp_test');
+const AUTOMATION_CALLBACK_SECRET = String(process.env.AUTOMATION_CALLBACK_SECRET || '');
 
 const CENTRAL_SERVICE_ACCOUNT_JSON = process.env.CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON || '';
 const CENTRAL_PROJECT_ID = process.env.CENTRAL_FIREBASE_PROJECT_ID || '';
@@ -694,6 +695,20 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0, skippedNoConsent };
   }
 
+  if (!AUTOMATION_CALLBACK_SECRET) {
+    const failedSchedule = {
+      ...schedule,
+      lastRunAt: now.toISOString(),
+      lastRunStatus: 'failed',
+      lastRunSummary: { eligible: eligible.length, queued: 0, failed: eligible.length },
+    };
+    await setShopAutomationScheduler(shop, failedSchedule);
+    return { shopId: shop.shopId, status: 'failed', eligible: eligible.length, queued: 0, failed: eligible.length, error: 'AUTOMATION_CALLBACK_SECRET is not configured.' };
+  }
+
+  const runToken = sha256(`${shop.shopId}|${dayKey}|${now.toISOString()}|${Math.random()}`);
+  const callbackUrl = `${baseUrlFromReq(null)}/api/internal/automation-blast-result`;
+
   try {
     await whatsappBridgeFetch('/api/blast', {
       method: 'POST',
@@ -709,6 +724,9 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
         campaignName: 'Scheduled Customer Automations',
         consentConfirmed: true,
         automation: true,
+        callbackUrl,
+        callbackSecret: AUTOMATION_CALLBACK_SECRET,
+        runToken,
       }),
     });
   } catch (error) {
@@ -728,22 +746,13 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     triggeredAt: now.toISOString(),
     status: 'queued',
     dedupeKey: item.dedupeKey,
-  }));
-  const newMessages = eligible.map((item) => ({
-    __docId: `automation-${sha256(item.dedupeKey)}`,
-    id: `automation-${sha256(item.dedupeKey)}`,
-    customerId: item.customerId,
-    text: item.message,
-    channel: 'WhatsApp',
-    date: now.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }),
-    createdAt: now.toISOString(),
-    opened: false,
+    runToken,
+    messageText: item.message,
   }));
 
   const mergedRuns = [...automationRuns, ...newRuns];
   const writes = [
     ...newRuns.map((run) => makeUpdateWrite(projectId, 'automationRuns', sha256(`${run.dedupeKey}|${run.triggeredAt}`), run)),
-    ...newMessages.map((message) => makeUpdateWrite(projectId, 'messages', message.__docId, message)),
     ...automations.map((auto) => makeUpdateWrite(projectId, 'automations', auto.__docId || auto.id, automationStatsFor(auto, mergedRuns))),
     makeUpdateWrite(projectId, 'automationScheduler', 'current', {
       ...schedule,
@@ -769,6 +778,87 @@ async function setShopAutomationScheduler(shop, schedule) {
   await commitWrites(serviceAccount, projectId, [
     makeUpdateWrite(projectId, 'automationScheduler', 'current', schedule),
   ]);
+}
+
+async function processAutomationBlastResult(payload) {
+  const shopId = safeShopId(payload?.shopId);
+  const runToken = String(payload?.runToken || '');
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  if (!runToken) fail(400, 'runToken is required.');
+
+  const shop = await getShopRecord(shopId);
+  if (!shop || shop.deletedAt) fail(404, 'Shop not found.');
+  const { serviceAccount, projectId } = await getShopFirebase(shop);
+  const [runs, automations] = await Promise.all([
+    listDocuments(serviceAccount, projectId, 'automationRuns'),
+    listDocuments(serviceAccount, projectId, 'automations'),
+  ]);
+
+  const resultById = new Map(results.map((result) => [String(result?.id), result]));
+  const relevant = runs.filter((run) => run.runToken === runToken);
+  if (!relevant.length) {
+    return { shopId, updated: 0, sent: 0, failed: 0, status: 'ignored' };
+  }
+
+  const now = new Date().toISOString();
+  const updatedRuns = runs.map((run) => {
+    if (run.runToken !== runToken) return run;
+    const result = resultById.get(`${run.automationId}-${run.customerId}`);
+    if (result?.status === 'sent') {
+      return { ...run, status: 'sent', sentAt: result.sentAt || now };
+    }
+    if (result?.status === 'failed') {
+      return { ...run, status: 'failed', failedAt: now, failureReason: result.error || 'WhatsApp send failed.' };
+    }
+    return { ...run, status: 'failed', failedAt: now, failureReason: 'Worker did not return a send result.' };
+  });
+
+  const callbackResults = updatedRuns.filter((run) => run.runToken === runToken);
+  const sentRuns = callbackResults.filter((run) => run.status === 'sent');
+  const failedRuns = callbackResults.filter((run) => run.status === 'failed');
+  const callbackStatus = failedRuns.length === 0
+    ? 'success'
+    : sentRuns.length === 0
+      ? 'failed'
+      : 'partial';
+
+  const messageWrites = sentRuns.map((run) => {
+    const id = `automation-${sha256(run.dedupeKey)}`;
+    return makeUpdateWrite(projectId, 'messages', id, {
+      id,
+      customerId: run.customerId,
+      text: run.messageText || '',
+      channel: 'WhatsApp',
+      date: new Date(run.sentAt || now).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }),
+      createdAt: run.sentAt || now,
+      opened: false,
+    });
+  });
+
+  const mergedAutomations = automations.map((auto) => automationStatsFor(auto, updatedRuns));
+  const schedule = normalizeAutomationSchedule((await getShopAutomationScheduler(shop)) || {});
+  const currentRunDay = schedule.lastRunDate;
+  const updatedSchedule = {
+    ...schedule,
+    lastRunAt: now,
+    lastRunStatus: callbackStatus,
+    lastRunSummary: {
+      eligible: callbackResults.length,
+      queued: callbackResults.filter((run) => run.status === 'queued').length,
+      failed: failedRuns.length,
+    },
+    lastRunDate: currentRunDay,
+  };
+
+  const writes = [
+    ...callbackResults.map((run) => makeUpdateWrite(projectId, 'automationRuns', run.__docId, run)),
+    ...messageWrites,
+    ...mergedAutomations.map((auto) => makeUpdateWrite(projectId, 'automations', auto.__docId || auto.id, auto)),
+    makeUpdateWrite(projectId, 'automationScheduler', 'current', updatedSchedule),
+  ];
+  await commitWrites(serviceAccount, projectId, writes);
+
+  return { shopId, updated: callbackResults.length, sent: sentRuns.length, failed: failedRuns.length, status: callbackStatus };
 }
 
 async function processAutomationSchedules() {
@@ -1182,6 +1272,17 @@ app.post('/api/shop/:shopId/reset', requireShopAccess, async (req, res, next) =>
       await commitWrites(serviceAccount, projectId, docs.map(d => makeDeleteWrite(projectId, collection, d.__docId)));
     }
     res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/internal/automation-blast-result', async (req, res, next) => {
+  try {
+    const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!AUTOMATION_CALLBACK_SECRET || !hashEqual(supplied, AUTOMATION_CALLBACK_SECRET)) {
+      return res.status(401).json({ error: 'Unauthorized.' });
+    }
+    const result = await processAutomationBlastResult(req.body || {});
+    res.json({ success: true, ...result });
   } catch (e) { next(e); }
 });
 
