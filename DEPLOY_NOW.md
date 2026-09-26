@@ -1,70 +1,69 @@
-# ReBook — deploy checklist
+# ReBook — production deployment
 
-## 1. GitHub
-Keep secrets outside the repository. Do not commit `.env`, Firebase service-account JSON files, or payment secrets.
+## Runtime
 
-## 2. Vercel environment variables
+ReBook runs the frontend/API on Vercel. The WhatsApp Web worker runs inside a persistent Vercel Sandbox; no Oracle VM and no user-side Node.js process are required.
 
-Server secrets:
-- APP_BASE_URL=https://YOUR-VERCEL-DOMAIN
-- FRONTEND_BASE_URL=https://YOUR-VERCEL-DOMAIN
-- SUPER_ADMIN_PASSWORD=...
-- ADMIN_SESSION_SECRET=...
-- MASTER_ENCRYPTION_KEY=...
-- CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON=...
-- RAZORPAY_KEY_ID=...
-- RAZORPAY_KEY_SECRET=...
-- RAZORPAY_WEBHOOK_SECRET=...
-- CRON_SECRET=...
-- ALLOW_CLOUD_RESET=false
+The Sandbox exposes its worker port through a public domain. ReBook's API proxies all WhatsApp requests to that worker and keeps the worker secret server-side.
 
-Public site configuration:
-- VITE_LEGAL_BUSINESS_NAME=YOUR_REAL_LEGAL_BUSINESS_NAME
-- VITE_SUPPORT_EMAIL=YOUR_REAL_SUPPORT_EMAIL
-- VITE_SUPPORT_PHONE=YOUR_REAL_SUPPORT_PHONE
-- VITE_BUSINESS_ADDRESS=YOUR_REAL_BUSINESS_ADDRESS
+## Vercel environment variables
 
-`REBOOK_API_URL` is used for local Vite proxying and is not required by the production browser app.
+Required:
+- APP_BASE_URL
+- FRONTEND_BASE_URL
+- SUPER_ADMIN_PASSWORD
+- ADMIN_SESSION_SECRET
+- MASTER_ENCRYPTION_KEY
+- CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON
+- RAZORPAY_KEY_ID
+- RAZORPAY_KEY_SECRET
+- RAZORPAY_WEBHOOK_SECRET
+- CRON_SECRET
+- DEMO_WHATSAPP_PIN=7439
+- DEMO_WHATSAPP_SHOP_ID=rebook-demo-test
+- WHATSAPP_BRIDGE_SECRET
+- AUTOMATION_CALLBACK_SECRET
+- WHATSAPP_MAX_SESSIONS=2
+- WHATSAPP_MAX_RECIPIENTS=100
+- WHATSAPP_MAX_AUTOMATION_RECIPIENTS=150
+- WHATSAPP_AUTOMATION_DELAY_MS=2000
+- VERCEL_SANDBOX_NAME=rebook-whatsapp-worker
+- VERCEL_SANDBOX_PROJECT_ID=prj_DSQLRKITHzL5lBtWruqVZsaGv8D8
+- VERCEL_SANDBOX_VCPUS=4
+- VERCEL_SANDBOX_TIMEOUT_MS=2700000
+- VERCEL_SANDBOX_SNAPSHOT_TTL_MS=1209600000
 
-## 3. Public compliance pages
+Do not expose the worker secret or Sandbox auth token to the browser.
 
-The production site includes:
-- /
-- /about
-- /pricing
-- /contact
-- /terms
-- /privacy-policy
-- /refund-policy
-- /security
+## WhatsApp flow
 
-Before payment-gateway review, replace the public site placeholders with real business/contact information and review the legal text for your actual business and applicable law.
+1. Demo or paid shop requests a WhatsApp action from the browser.
+2. ReBook API starts/resumes the named Vercel Sandbox.
+3. Sandbox installs the pinned whatsapp-web.js worker if needed.
+4. Worker starts on port 5001 and exposes health/status/connect/send/blast endpoints.
+5. ReBook proxies the response back to the browser.
+6. WhatsApp sessions use persistent LocalAuth data inside the Sandbox filesystem.
 
-## 4. Razorpay
+## Scheduled automation
 
-Webhook:
-https://YOUR-VERCEL-DOMAIN/api/razorpay/webhook
+Daily scheduler eligibility is evaluated server-side. Eligible recipients are split into batches of at most WHATSAPP_MAX_AUTOMATION_RECIPIENTS and persisted as queued automation runs before each batch is submitted.
 
-Use the Razorpay credentials for the ReBook merchant account, not credentials belonging to another business.
+The Sandbox worker queues additional automation batches for the same shop instead of returning a 409 while a previous batch is still sending.
 
-## 5. Smoke tests
+Each batch has its own callback token. The callback aggregates the whole day's queued/sent/failed state.
 
-- /api/health -> {"ok":true,"service":"rebook-api"}
-- /superadmin -> admin login
-- / -> public ReBook SaaS site
-- /pricing, /contact, /terms, /privacy-policy, /refund-policy
-- create a test shop
-- verify a test payment
-- confirm paid shop access
-- confirm expired/frozen behavior
+## Shop access links
 
-## 6. Important security
+The original private /shop/:shopId/:accessToken link still works. After first load, the access token is moved into sessionStorage and the browser URL is cleaned to /shop/:shopId.
 
-Rotate any Firebase service-account key that was exposed during development. Keep the replacement key only in the appropriate server-side environment variable.
+## Smoke tests
 
-
-## WhatsApp bridge note
-
-The current WhatsApp feature is a local whatsapp-web.js bridge. It requires the operator computer to remain online with the linked WhatsApp Web session available. The bridge now requires explicit customer opt-in, records STOP-style opt-outs locally, validates WhatsApp registration, blocks recent duplicates, and refuses fake simulator sends.
-
-The bridge is not Meta's official WhatsApp Business Platform. whatsapp-web.js's own project documentation notes that unofficial clients are not guaranteed safe from blocking. For a true multi-tenant production messaging product, migrate the WhatsApp channel to the official WhatsApp Business Platform/Cloud API.
+- /api/health
+- /demo
+- Demo PIN 7439
+- Connect -> QR appears
+- Scan -> Connected
+- Reset -> fresh QR
+- Create test shop -> payment -> active shop
+- Expiry -> frozen shop
+- Schedule more than 150 eligible automations -> jobs are batched
