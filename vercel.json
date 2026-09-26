@@ -67,10 +67,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "includeFiles": [
-        "whatsapp-worker/index.cjs",
-        "whatsapp-worker/package.json"
-      ]
+      "includeFiles": "whatsapp-worker/**"
     }
   }
 }
