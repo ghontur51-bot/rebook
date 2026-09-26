@@ -122,3 +122,20 @@ This is deliberately conservative because Chromium sessions are resource-heavy o
 ## WhatsApp implementation note
 
 This worker uses `whatsapp-web.js`, an unofficial WhatsApp Web client. ReBook therefore treats the worker as a replaceable infrastructure adapter. The application still enforces explicit consent, opt-out suppression and duplicate protection, but WhatsApp can change behavior affecting unofficial clients.
+
+## Demo WhatsApp testing
+
+The public `/demo` route can also use the real Oracle WhatsApp worker for private testing.
+
+Set these **server-side Vercel environment variables**:
+
+```env
+DEMO_WHATSAPP_PIN=your-private-test-pin
+DEMO_WHATSAPP_SHOP_ID=rebook-demo-test
+```
+
+No demo WhatsApp secret is bundled into the browser. On `/demo`, enter the same PIN in the WhatsApp panel. The PIN is kept only in the browser's session storage and is sent to the ReBook API over HTTPS.
+
+The demo worker session is isolated under the `DEMO_WHATSAPP_SHOP_ID` and does not require a real Central shop record.
+
+Disable or remove `DEMO_WHATSAPP_PIN` before opening the public demo to untrusted visitors.
