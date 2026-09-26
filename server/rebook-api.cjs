@@ -9,7 +9,17 @@ try {
 } catch (_) {}
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = String(process.env.REBOOK_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin not allowed by ReBook API.'));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { if (req.originalUrl === '/api/razorpay/webhook') req.rawBody = Buffer.from(buf); } }));
 
 const PORT = Number(process.env.REBOOK_API_PORT || process.env.API_PORT || 5000);
@@ -33,11 +43,26 @@ const SHOP_COLLECTIONS = [
 
 const tokenCache = new Map();
 const serviceAppCache = new Map();
+const adminLoginBuckets = new Map();
 
 function fail(status, message) {
   const error = new Error(message);
   error.status = status;
   throw error;
+}
+
+function checkAdminLoginRateLimit(ip) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const maxAttempts = 12;
+  const key = String(ip || 'unknown');
+  const existing = adminLoginBuckets.get(key);
+  const bucket = existing && now - existing.windowStart < windowMs
+    ? existing
+    : { windowStart: now, count: 0 };
+  bucket.count += 1;
+  adminLoginBuckets.set(key, bucket);
+  if (bucket.count > maxAttempts) fail(429, 'Too many login attempts. Please try again later.');
 }
 
 function jsonOrUndefined(raw, label) {
@@ -477,9 +502,10 @@ async function createRazorpayOrderForCycle(cycleId, shop) {
   return updated;
 }
 
-async function activatePaidCycle(cycle, payment) {
+async async function activatePaidCycle(cycle, payment) {
   const shop = await getShopRecord(cycle.shopId);
   if (!shop || shop.deletedAt) return;
+  if (shop.currentCycleId && shop.currentCycleId !== cycle.cycleId) return;
   if (cycle.status === 'paid') return;
   const paidAt = new Date().toISOString();
   const start = paidAt;
@@ -510,18 +536,28 @@ async function processWebhook(payload, signature) {
     const paymentId = entity.id;
     const cycles = await listCentral('billingCycles');
     const cycle = cycles.find(c => c.razorpayOrderId === orderId);
-    if (cycle) await activatePaidCycle(cycle, { paymentId, orderId });
+    if (!cycle) return;
+    const shop = await getShopRecord(cycle.shopId);
+    if (!shop || shop.deletedAt || (shop.currentCycleId && shop.currentCycleId !== cycle.cycleId)) return;
+    const expectedAmount = Math.round(Number(cycle.amount) * 100);
+    if (Number(entity.amount) !== expectedAmount || entity.currency !== cycle.currency || entity.status !== 'captured') {
+      fail(400, 'Webhook payment details do not match the expected billing cycle.');
+    }
+    await activatePaidCycle(cycle, { paymentId, orderId });
   }
 }
 
 // --- Core routes ---
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'rebook-api' }));
 
-app.post('/api/admin/login', (req, res) => {
-  if (!SUPER_ADMIN_PASSWORD) return res.status(500).json({ error: 'SUPER_ADMIN_PASSWORD is not configured.' });
-  const password = String(req.body?.password || '');
-  if (!password || !hashEqual(password, SUPER_ADMIN_PASSWORD)) return res.status(401).json({ error: 'Invalid password.' });
-  res.json({ success: true, token: signAdminToken({ role: 'superadmin' }) });
+app.post('/api/admin/login', (req, res, next) => {
+  try {
+    checkAdminLoginRateLimit(req.ip);
+    if (!SUPER_ADMIN_PASSWORD) return res.status(500).json({ error: 'SUPER_ADMIN_PASSWORD is not configured.' });
+    const password = String(req.body?.password || '');
+    if (!password || !hashEqual(password, SUPER_ADMIN_PASSWORD)) return res.status(401).json({ error: 'Invalid password.' });
+    res.json({ success: true, token: signAdminToken({ role: 'superadmin' }) });
+  } catch (e) { next(e); }
 });
 
 app.get('/api/admin/shops', requireAdmin, async (_req, res, next) => {
@@ -543,11 +579,23 @@ app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Firebase service account JSON is not valid JSON. Paste the original downloaded service-account JSON file contents exactly.' });
     }
     if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) return res.status(400).json({ error: 'Firebase service account JSON is missing project_id/client_email/private_key.' });
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(body.ownerEmail).trim())) return res.status(400).json({ error: 'ownerEmail must be a valid email address.' });
+    if (!Number.isFinite(Number(body.price)) || Number(body.price) <= 0) return res.status(400).json({ error: 'price must be greater than 0.' });
+    const configuredProjectId = String(body.firebaseProjectId || '').trim();
+    if (configuredProjectId && configuredProjectId !== serviceAccount.project_id) return res.status(400).json({ error: 'Firebase Project ID does not match the service-account project_id.' });
+    const publicConfig = body.firebaseWebConfig || null;
+    if (publicConfig !== null && (typeof publicConfig !== 'object' || !publicConfig.projectId || !publicConfig.appId || !publicConfig.apiKey)) {
+      return res.status(400).json({ error: 'Firebase Web App Config must contain projectId, appId and apiKey.' });
+    }
+    if (publicConfig?.projectId && publicConfig.projectId !== serviceAccount.project_id) return res.status(400).json({ error: 'Firebase Web App Config projectId does not match the service-account project_id.' });
+    const existingShops = await listCentral('shops');
+    if (existingShops.some((shop) => shop.firebaseProjectId === serviceAccount.project_id && shop.status !== 'deleted')) {
+      return res.status(409).json({ error: 'A shop is already connected to this Firebase project.' });
+    }
     serviceAccount.private_key = normalizeFirebasePrivateKey(serviceAccount.private_key);
     const shopId = `shop_${crypto.randomBytes(8).toString('hex')}`;
     const accessToken = crypto.randomBytes(24).toString('base64url');
     const cycleId = `cycle_${shopId}_initial`;
-    const publicConfig = body.firebaseWebConfig || null;
     const tempShop = {
       shopId,
       shopName: String(body.shopName).trim(),
@@ -646,6 +694,7 @@ app.post('/api/public/billing/:shopId/:cycleId/order', async (req, res, next) =>
     const cycle = await getBillingCycle(req.params.cycleId);
     if (!cycle || cycle.shopId !== shop.shopId) return res.status(404).json({ error: 'Billing cycle not found.' });
     if (cycle.status === 'paid') return res.status(409).json({ error: 'This billing cycle is already paid.' });
+    if (shop.currentCycleId && shop.currentCycleId !== cycle.cycleId) return res.status(409).json({ error: 'This billing cycle is no longer the current payable cycle.' });
     const updated = await createRazorpayOrderForCycle(cycle.cycleId, shop);
     res.json({ success: true, keyId: RAZORPAY_KEY_ID, orderId: updated.razorpayOrderId, amount: Number(updated.amount), currency: updated.currency });
   } catch (e) { next(e); }
@@ -656,6 +705,9 @@ app.post('/api/public/billing/verify', async (req, res, next) => {
     const { shopId, cycleId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
     const cycle = await getBillingCycle(cycleId);
     if (!cycle || cycle.shopId !== shopId) return res.status(404).json({ error: 'Billing cycle not found.' });
+    const shop = await getShopRecord(shopId);
+    if (!shop || shop.deletedAt) return res.status(404).json({ error: 'Shop not found.' });
+    if (shop.currentCycleId && shop.currentCycleId !== cycle.cycleId) return res.status(409).json({ error: 'This billing cycle is no longer the current payable cycle.' });
     const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
     if (!hashEqual(expected, razorpay_signature || '')) return res.status(400).json({ error: 'Payment signature verification failed.' });
     if (cycle.razorpayOrderId !== razorpay_order_id) return res.status(400).json({ error: 'Payment order mismatch.' });
