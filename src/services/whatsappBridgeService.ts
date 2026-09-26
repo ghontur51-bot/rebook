@@ -145,7 +145,8 @@ export async function startBridgeBlast(
   recipients: BlastRecipient[],
   message: string,
   campaignName: string = "Blast Campaign",
-  delayMs: number = 3000
+  delayMs: number = 5000,
+  consentConfirmed: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const res = await fetch(`${BRIDGE_URL}/api/blast`, {
@@ -156,6 +157,7 @@ export async function startBridgeBlast(
         message,
         campaignName,
         delayMs,
+        consentConfirmed,
       }),
     });
     const data = await res.json();
@@ -203,13 +205,14 @@ export async function cancelBridgeBlast(): Promise<boolean> {
 export async function sendSingleViaBridge(
   phone: string,
   message: string,
-  name: string
+  name: string,
+  consentConfirmed: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const res = await fetch(`${BRIDGE_URL}/api/send-single`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, message, name }),
+      body: JSON.stringify({ phone, message, name, consentConfirmed }),
     });
     const data = await res.json();
     return { success: res.ok, error: data.error };
