@@ -331,12 +331,20 @@ app.post("/api/send-single", async (req, res) => {
 
 app.post("/api/blast", async (req, res) => {
   try {
-    const { shopId, recipients, message, campaignName, consentConfirmed } = req.body || {};
+    const { shopId, recipients, message, campaignName, consentConfirmed, automation } = req.body || {};
     assertConsent(consentConfirmed);
     const s = await getSessionReady(shopId);
     if (!s.isReady) throw new Error("WhatsApp is not connected. Scan the QR code first.");
     if (!Array.isArray(recipients) || recipients.length === 0) throw new Error("Recipients list is required.");
-    if (recipients.length > MAX_RECIPIENTS_PER_BLAST) throw new Error(`This worker allows at most ${MAX_RECIPIENTS_PER_BLAST} recipients per campaign.`);
+
+    const automationMax = Math.max(
+      MAX_RECIPIENTS_PER_BLAST,
+      Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 500), 500),
+    );
+    const maxRecipients = automation === true ? automationMax : MAX_RECIPIENTS_PER_BLAST;
+    if (recipients.length > maxRecipients) {
+      throw new Error(`This worker allows at most ${maxRecipients} recipients per campaign.`);
+    }
     if (s.activeBlast.isRunning) return res.status(409).json({ error: "A WhatsApp campaign is already running for this shop." });
 
     const seen = new Set();
@@ -344,7 +352,14 @@ app.post("/api/blast", async (req, res) => {
       const phone = normalizePhone(recipient?.phone);
       if (seen.has(phone)) throw new Error(`Duplicate recipient detected: ${phone}.`);
       seen.add(phone);
-      return { id: recipient?.id ?? index, name: String(recipient?.name || "Customer"), phone, status: "pending", error: null };
+      return {
+        id: recipient?.id ?? index,
+        name: String(recipient?.name || "Customer"),
+        phone,
+        message: String(recipient?.message || message || ""),
+        status: "pending",
+        error: null,
+      };
     }).filter((recipient) => !s.suppressedNumbers.has(recipient.phone));
 
     if (!queue.length) throw new Error("No eligible recipients remain after WhatsApp opt-out filtering.");
