@@ -502,7 +502,7 @@ async function createRazorpayOrderForCycle(cycleId, shop) {
   return updated;
 }
 
-async async function activatePaidCycle(cycle, payment) {
+async function activatePaidCycle(cycle, payment) {
   const shop = await getShopRecord(cycle.shopId);
   if (!shop || shop.deletedAt) return;
   if (shop.currentCycleId && shop.currentCycleId !== cycle.cycleId) return;
