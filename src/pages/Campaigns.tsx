@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from "react";
 import { useApp, Customer, Campaign, isRepeatCustomer } from "../context/AppContext";
 import {
   getBridgeStatus,
+  connectBridgeSession,
+  getDemoWhatsAppPin,
+  setDemoWhatsAppPin,
+  clearDemoWhatsAppPin,
   startBridgeBlast,
   getBlastProgress,
   cancelBridgeBlast,
@@ -77,6 +81,8 @@ function WhatsAppBlastModal({
   const [showQrModal, setShowQrModal] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [currentSendingName, setCurrentSendingName] = useState<string>("");
+  const [demoPin, setDemoPin] = useState("");
+  const [demoPinSaved, setDemoPinSaved] = useState(Boolean(getDemoWhatsAppPin()));
   const completionRecorded = useRef(false);
   const blastIntervalRef = useRef<any>(null);
 
@@ -371,6 +377,32 @@ function WhatsAppBlastModal({
           </div>
 
           <div className="modal-body" style={{ overflowY: "auto", paddingTop: 16 }}>
+            {window.location.pathname.replace(/\/+$/, "") === "/demo" && (
+              <div style={{ marginBottom: 14, padding: 12, background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 7, color: "#9A3412" }}>Private Demo WhatsApp Test</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    type="password"
+                    value={demoPin}
+                    onChange={(e) => setDemoPin(e.target.value)}
+                    placeholder="Enter demo PIN"
+                    style={{ flex: "1 1 220px", minWidth: 180, padding: "8px 10px", borderRadius: 8, border: "1px solid #FDBA74" }}
+                  />
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setDemoWhatsAppPin(demoPin.trim());
+                      setDemoPinSaved(Boolean(demoPin.trim()));
+                    }}
+                  >
+                    Unlock
+                  </button>
+                  {demoPinSaved && <button className="btn-secondary" onClick={() => { clearDemoWhatsAppPin(); setDemoPin(""); setDemoPinSaved(false); }}>Lock</button>}
+                </div>
+                <div style={{ marginTop: 7, fontSize: 11, color: "#9A3412" }}>This is only for testing your own WhatsApp connection on the demo. The PIN stays in this browser session.</div>
+              </div>
+            )}
+
             {/* Polished WhatsApp Bridge Status Banner */}
             <div style={{
               background: bridgeStatus.isReady ? "#F0FDF4" : "#F8FAFC",
@@ -394,14 +426,14 @@ function WhatsAppBlastModal({
                       ? `WhatsApp Connected (${bridgeStatus.clientInfo?.name || "Linked Device"})`
                       : bridgeStatus.hasQr
                       ? "Pairing QR Code Ready"
-                      : "WhatsApp Bridge (Local)"}
+                      : "WhatsApp Cloud Worker"}
                   </div>
                   <div style={{ color: "var(--muted-foreground)", fontSize: 11, marginTop: 1 }}>
                     {bridgeStatus.isReady
-                      ? "Zero keypresses needed. Messages are dispatched directly via your session."
+                      ? "Connected. Messages are dispatched by the persistent cloud worker."
                       : bridgeStatus.hasQr
-                      ? "Click 'Connect to WhatsApp' below to view and scan the QR code."
-                      : "The ReBook cloud worker manages this WhatsApp session. Scan the pairing QR shown here once; no customer computer setup is required."}
+                      ? "The QR is ready. Scan it with WhatsApp → Linked Devices."
+                      : "Click Connect to start or resume your cloud WhatsApp session."}
                   </div>
                 </div>
               </div>
@@ -410,7 +442,17 @@ function WhatsAppBlastModal({
                 {/* CONNECT TO WHATSAPP BUTTON: Shows QR modal ONLY when user explicitly clicks */}
                 {!bridgeStatus.isReady && (
                   <button
-                    onClick={() => setShowQrModal(true)}
+                    onClick={async () => {
+                      if (window.location.pathname.replace(/\/+$/, "") === "/demo" && !demoPinSaved) {
+                        setPopupData({ isOpen: true, title: "Demo WhatsApp PIN required", message: "Enter the private demo PIN in the field above before connecting your WhatsApp.", type: "warning" });
+                        return;
+                      }
+                      setShowQrModal(true);
+                      const result = await connectBridgeSession();
+                      if (!result.success) {
+                        setPopupData({ isOpen: true, title: "WhatsApp Connection", message: result.error || "Unable to start the WhatsApp session.", type: "error" });
+                      }
+                    }}
                     style={{
                       background: "linear-gradient(135deg, #25D366, #128C7E)",
                       border: "none",
