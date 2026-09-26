@@ -1,54 +1,63 @@
-# ReBook — Deploy Now
+# ReBook — deploy checklist
 
-## 1. Push this folder to GitHub
+## 1. GitHub
+Keep secrets outside the repository. Do not commit `.env`, Firebase service-account JSON files, or payment secrets.
 
-Do not add `.env` or any Firebase service-account JSON file.
+## 2. Vercel environment variables
 
-## 2. Import the repository into Vercel
+Server secrets:
+- APP_BASE_URL=https://YOUR-VERCEL-DOMAIN
+- FRONTEND_BASE_URL=https://YOUR-VERCEL-DOMAIN
+- SUPER_ADMIN_PASSWORD=...
+- ADMIN_SESSION_SECRET=...
+- MASTER_ENCRYPTION_KEY=...
+- CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON=...
+- RAZORPAY_KEY_ID=...
+- RAZORPAY_KEY_SECRET=...
+- RAZORPAY_WEBHOOK_SECRET=...
+- CRON_SECRET=...
+- ALLOW_CLOUD_RESET=false
 
-- Framework preset: Vite (or leave auto-detected)
-- Build command: `npm run build`
-- Output directory: `dist`
-- Install command: `npm install`
+Public site configuration:
+- VITE_LEGAL_BUSINESS_NAME=YOUR_REAL_LEGAL_BUSINESS_NAME
+- VITE_SUPPORT_EMAIL=YOUR_REAL_SUPPORT_EMAIL
+- VITE_SUPPORT_PHONE=YOUR_REAL_SUPPORT_PHONE
+- VITE_BUSINESS_ADDRESS=YOUR_REAL_BUSINESS_ADDRESS
 
-## 3. Add these Vercel environment variables
+`REBOOK_API_URL` is used for local Vite proxying and is not required by the production browser app.
 
-`APP_BASE_URL=https://YOUR-PROJECT.vercel.app`
-`FRONTEND_BASE_URL=https://YOUR-PROJECT.vercel.app`
-`REBOOK_API_PORT=5000`
-`SUPER_ADMIN_PASSWORD=...`
-`ADMIN_SESSION_SECRET=...`
-`MASTER_ENCRYPTION_KEY=...`
-`CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON=...`
-`RAZORPAY_KEY_ID=...`
-`RAZORPAY_KEY_SECRET=...`
-`RAZORPAY_WEBHOOK_SECRET=...`
-`CRON_SECRET=...`
-`ALLOW_CLOUD_RESET=false`
+## 3. Public compliance pages
 
-Do not set any real secret in client-side Vite variables.
+The production site includes:
+- /
+- /about
+- /pricing
+- /contact
+- /terms
+- /privacy-policy
+- /refund-policy
+- /security
 
-## 4. Deploy
+Before payment-gateway review, replace the public site placeholders with real business/contact information and review the legal text for your actual business and applicable law.
 
-After deployment, open:
+## 4. Razorpay
 
-- `https://YOUR-PROJECT.vercel.app/`
-- `https://YOUR-PROJECT.vercel.app/superadmin`
-- `https://YOUR-PROJECT.vercel.app/api/health`
+Webhook:
+https://YOUR-VERCEL-DOMAIN/api/razorpay/webhook
 
-## 5. Razorpay webhook
+Use the Razorpay credentials for the ReBook merchant account, not credentials belonging to another business.
 
-Set the webhook URL to:
+## 5. Smoke tests
 
-`https://YOUR-PROJECT.vercel.app/api/razorpay/webhook`
+- /api/health -> {"ok":true,"service":"rebook-api"}
+- /superadmin -> admin login
+- / -> public ReBook SaaS site
+- /pricing, /contact, /terms, /privacy-policy, /refund-policy
+- create a test shop
+- verify a test payment
+- confirm paid shop access
+- confirm expired/frozen behavior
 
-Use the same `RAZORPAY_WEBHOOK_SECRET` configured in Vercel.
+## 6. Important security
 
-## 6. Final check
-
-- Create a shop.
-- Confirm its generated URL uses the Vercel hostname, not localhost.
-- Open the shop URL directly in a fresh browser tab.
-- Open the payment URL directly.
-- Test Razorpay test-mode payment before using live credentials.
-- Confirm `/api/cron/billing` is registered by Vercel.
+Rotate any Firebase service-account key that was exposed during development. Keep the replacement key only in the appropriate server-side environment variable.
