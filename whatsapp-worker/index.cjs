@@ -105,6 +105,7 @@ function getSession(shopId) {
       connectionState: "UNLAUNCHED",
       clientInfo: null,
       initializationError: null,
+      initializationStartedAt: null,
       suppressedNumbers: loadSuppressed(id),
       recentSends: new Map(),
       activeBlast: freshBlast(),
@@ -119,6 +120,39 @@ function connectedSessionCount() {
   return [...sessions.values()].filter((s) => s.client && ["DISCONNECTED", "UNLAUNCHED"].indexOf(s.connectionState) === -1).length;
 }
 
+function resolvePuppeteer() {
+  const whatsappEntry = require.resolve("whatsapp-web.js");
+  const puppeteerEntry = require.resolve("puppeteer", { paths: [path.dirname(whatsappEntry)] });
+  return require(puppeteerEntry);
+}
+
+async function initializeBrowserPreflight() {
+  const puppeteer = resolvePuppeteer();
+  const executablePath = typeof puppeteer.executablePath === "function" ? puppeteer.executablePath() : "";
+  if (!executablePath) throw new Error("Puppeteer could not resolve a Chrome/Chromium executable.");
+
+  const browser = await puppeteer.launch({
+    executablePath,
+    headless: "shell",
+    timeout: 45000,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-extensions",
+      "--mute-audio",
+    ],
+  });
+  await browser.close();
+  return executablePath;
+}
+
 async function initializeSession(shopId) {
   const s = getSession(shopId);
   if (s.client || s.initializationPromise) return s;
@@ -131,12 +165,19 @@ async function initializeSession(shopId) {
 
   s.connectionState = "STARTING";
   s.initializationError = null;
+  s.initializationStartedAt = new Date().toISOString();
+
   s.initializationPromise = (async () => {
+    const executablePath = await initializeBrowserPreflight();
     const { Client, LocalAuth } = require("whatsapp-web.js");
+
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: shopId, dataPath: SESSION_DIR }),
       puppeteer: {
-        headless: true,
+        executablePath,
+        headless: "shell",
+        timeout: 120000,
+        protocolTimeout: 120000,
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -154,10 +195,18 @@ async function initializeSession(shopId) {
     });
 
     s.client = client;
+    s.connectionState = "BROWSER_STARTED";
+
+    client.on("loading_screen", (percent, message) => {
+      s.connectionState = "LOADING";
+      s.initializationError = message ? String(message) : null;
+      s.loadingPercent = Number(percent) || 0;
+    });
 
     client.on("qr", async (qr) => {
       s.isReady = false;
       s.connectionState = "PAIRING";
+      s.loadingPercent = 0;
       try {
         s.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 360 });
         s.initializationError = null;
@@ -177,6 +226,7 @@ async function initializeSession(shopId) {
       s.connectionState = "CONNECTED";
       s.qrDataUrl = null;
       s.initializationError = null;
+      s.loadingPercent = 100;
       s.clientInfo = client.info ? {
         name: client.info.pushname || "WhatsApp",
         phone: client.info.wid?.user || "",
@@ -217,22 +267,37 @@ async function initializeSession(shopId) {
       s.qrDataUrl = null;
       s.client = null;
       s.initializationPromise = null;
+      s.initializationStartedAt = null;
       console.warn(`WhatsApp disconnected: ${shopId}`, reason);
     });
 
-    await client.initialize();
-  })().catch((error) => {
+    const initializeWithTimeout = Promise.race([
+      client.initialize(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("WhatsApp Web initialization exceeded 120 seconds.")), 120000);
+      }),
+    ]);
+
+    await initializeWithTimeout;
+  })().catch(async (error) => {
     s.isReady = false;
     s.connectionState = "ERROR";
     s.initializationError = error.message || "Unable to initialize WhatsApp.";
-    s.client = null;
+    s.clientInfo = null;
+    s.qrDataUrl = null;
     console.error(`WhatsApp initialization failed: ${shopId}`, error);
+
+    if (s.client) {
+      try { await s.client.destroy(); } catch {}
+      s.client = null;
+    }
   }).finally(() => {
     s.initializationPromise = null;
   });
 
   return s;
 }
+
 
 async function getSessionReady(shopId) {
   const s = getSession(shopId);
