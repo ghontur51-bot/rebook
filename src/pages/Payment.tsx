@@ -89,7 +89,7 @@ export default function Payment({ shopId, cycleId }: { shopId: string; cycleId: 
       <div className="stat-card" style={{ width: "100%", maxWidth: 520, padding: 32, textAlign: "center" }}>
         <div style={{ fontSize: 14, color: "var(--muted-foreground)" }}>ReBook subscription</div>
         <h1 style={{ fontSize: 24, fontWeight: 800, margin: "8px 0 4px" }}>{data.shop.shopName}</h1>
-        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>30-day access</div>
+        <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>30-day access · Secure checkout powered by Razorpay</div>
         <div style={{ fontSize: 34, fontWeight: 900, marginTop: 20 }}>₹{Number(cycle.amount || 0).toLocaleString("en-IN")}</div>
         {paid ? (
           <div style={{ marginTop: 18, padding: 14, borderRadius: 10, background: "#DCFCE7", color: "#166534", fontWeight: 700 }}>
@@ -103,6 +103,13 @@ export default function Payment({ shopId, cycleId }: { shopId: string; cycleId: 
             {error && <div style={{ marginTop: 14, fontSize: 13, color: "#B91C1C" }}>{error}</div>}
           </>
         )}
+        <div style={{ marginTop: 20, fontSize: 11, color: "var(--muted-foreground)", lineHeight: 1.6 }}>
+          By continuing, you acknowledge the ReBook <a href="/terms">Terms of Service</a>, <a href="/privacy-policy">Privacy Policy</a> and <a href="/refund-policy">Refund & Cancellation Policy</a>.
+        </div>
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "center", gap: 14, flexWrap: "wrap", fontSize: 11 }}>
+          <a href="/contact">Contact</a>
+          <a href="/about">About ReBook</a>
+        </div>
       </div>
     </div>
   );
