@@ -11,7 +11,9 @@ export interface BridgeStatus {
   connectionState?: string;
   initializationError?: string | null;
   suppressionCount?: number;
-  activeBlast?: { isRunning: boolean; total: number; sentCount: number; currentIndex: number };
+  activeBlast?: { isRunning: boolean; total: number; sentCount: number; currentIndex: number; };
+  initializationStartedAt?: string | null;
+  loadingPercent?: number;
 }
 
 export interface BlastRecipient { id: number | string; name: string; phone: string; avatar?: string; }
@@ -107,7 +109,7 @@ export async function getBridgeStatus(forceFresh = false): Promise<BridgeStatus>
   inFlightStatusPromise = (async () => {
     try {
       const data = await bridgeRequest<BridgeStatus>('/status', { method: 'GET', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
-      const next: BridgeStatus = { online: true, isReady: Boolean(data.isReady), hasQr: Boolean(data.hasQr), qrDataUrl: data.qrDataUrl || null, clientInfo: data.clientInfo || null, connectionState: data.connectionState, initializationError: data.initializationError || null, suppressionCount: data.suppressionCount, activeBlast: data.activeBlast };
+      const next: BridgeStatus = { online: true, isReady: Boolean(data.isReady), hasQr: Boolean(data.hasQr), qrDataUrl: data.qrDataUrl || null, clientInfo: data.clientInfo || null, connectionState: data.connectionState, initializationError: data.initializationError || null, initializationStartedAt: data.initializationStartedAt || null, loadingPercent: Number(data.loadingPercent || 0), suppressionCount: data.suppressionCount, activeBlast: data.activeBlast };
       lastKnownStatus = next; lastStatusTimestamp = Date.now(); return next;
     } catch (error: any) {
       const offline: BridgeStatus = { online: false, isReady: false, hasQr: false, qrDataUrl: null, clientInfo: null, initializationError: error?.message || 'WhatsApp worker is unavailable.' };
