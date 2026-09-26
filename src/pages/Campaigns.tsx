@@ -5,6 +5,7 @@ import {
   connectBridgeSession,
   getDemoWhatsAppPin,
   setDemoWhatsAppPin,
+  verifyDemoWhatsAppPin,
   clearDemoWhatsAppPin,
   startBridgeBlast,
   getBlastProgress,
@@ -145,6 +146,25 @@ function WhatsAppBlastModal({
       }
     };
   }, [showQrModal]);
+
+  // A PIN saved in sessionStorage is only considered unlocked after the server verifies it.
+  useEffect(() => {
+    if (window.location.pathname.replace(/\/+$/, "") !== "/demo") return;
+    const savedPin = getDemoWhatsAppPin();
+    if (!savedPin) return;
+
+    let mounted = true;
+    verifyDemoWhatsAppPin(savedPin).then((result) => {
+      if (!mounted || result.success) return;
+      clearDemoWhatsAppPin();
+      setDemoPin("");
+      setDemoPinSaved(false);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Handle Delete / Reset WhatsApp Bridge Data with beautiful popup cards
   const promptDeleteBridgeData = () => {
@@ -390,14 +410,42 @@ function WhatsAppBlastModal({
                   />
                   <button
                     className="btn-secondary"
-                    onClick={() => {
-                      setDemoWhatsAppPin(demoPin.trim());
-                      setDemoPinSaved(Boolean(demoPin.trim()));
+                    disabled={!demoPin.trim()}
+                    onClick={async () => {
+                      const candidate = demoPin.trim();
+                      if (!candidate) return;
+
+                      const result = await verifyDemoWhatsAppPin(candidate);
+                      if (!result.success) {
+                        clearDemoWhatsAppPin();
+                        setDemoPinSaved(false);
+                        setPopupData({
+                          isOpen: true,
+                          title: "Invalid Demo PIN",
+                          message: result.error || "That PIN is not valid. Enter the private demo PIN configured in Vercel.",
+                          type: "error"
+                        });
+                        return;
+                      }
+
+                      setDemoWhatsAppPin(candidate);
+                      setDemoPinSaved(true);
+                      setPopupData({
+                        isOpen: true,
+                        title: "Demo WhatsApp unlocked",
+                        message: "PIN verified. You can now connect the demo WhatsApp session.",
+                        type: "success"
+                      });
                     }}
                   >
                     Unlock
                   </button>
-                  {demoPinSaved && <button className="btn-secondary" onClick={() => { clearDemoWhatsAppPin(); setDemoPin(""); setDemoPinSaved(false); }}>Lock</button>}
+                  {demoPinSaved && (
+                    <>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D" }}>✓ PIN verified</span>
+                      <button className="btn-secondary" onClick={() => { clearDemoWhatsAppPin(); setDemoPin(""); setDemoPinSaved(false); }}>Lock</button>
+                    </>
+                  )}
                 </div>
                 <div style={{ marginTop: 7, fontSize: 11, color: "#9A3412" }}>This is only for testing your own WhatsApp connection on the demo. The PIN stays in this browser session.</div>
               </div>
