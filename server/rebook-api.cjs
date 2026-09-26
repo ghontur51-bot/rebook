@@ -1146,6 +1146,10 @@ app.post('/api/razorpay/webhook', async (req, res, next) => {
 });
 
 // WhatsApp worker proxy. The browser never talks directly to Oracle.
+app.get('/api/demo/whatsapp/verify', requireDemoWhatsApp, (_req, res) => {
+  res.json({ success: true });
+});
+
 app.get('/api/demo/whatsapp/status', requireDemoWhatsApp, async (_req, res, next) => {
   try { res.json(await demoWhatsAppProxy(`/api/status?shopId=${encodeURIComponent(DEMO_WHATSAPP_SHOP_ID)}`, { method: 'GET' })); }
   catch (e) { next(e); }
