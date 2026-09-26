@@ -2,8 +2,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 const SANDBOX_NAME_PREFIX = String(process.env.REBOOK_SANDBOX_NAME || "rebook-whatsapp");
-const SANDBOX_PROJECT_ID = String(process.env.REBOOK_SANDBOX_PROJECT_ID || process.env.VERCEL_PROJECT_ID || "").trim();
-const SANDBOX_TEAM_ID = String(process.env.REBOOK_SANDBOX_TEAM_ID || process.env.VERCEL_TEAM_ID || "").trim();
+const SANDBOX_PROJECT_ID = String(process.env.REBOOK_SANDBOX_PROJECT_ID || "").trim();
+const SANDBOX_TEAM_ID = String(process.env.REBOOK_SANDBOX_TEAM_ID || "").trim();
 const SANDBOX_TIMEOUT_MS = Number(process.env.REBOOK_SANDBOX_TIMEOUT_MS || 45 * 60 * 1000);
 const SANDBOX_SNAPSHOT_TTL_MS = Number(process.env.REBOOK_SANDBOX_SNAPSHOT_TTL_MS || 14 * 24 * 60 * 60 * 1000);
 const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
@@ -20,8 +20,18 @@ async function getSandboxSdk() {
 }
 
 function sandboxAuthOptions() {
-  const token = process.env.VERCEL_TOKEN || process.env.VERCEL_OIDC_TOKEN;
-  return token ? { token } : {};
+  const token = String(process.env.VERCEL_TOKEN || "").trim();
+  const projectId = String(process.env.REBOOK_SANDBOX_PROJECT_ID || "").trim();
+  const teamId = String(process.env.REBOOK_SANDBOX_TEAM_ID || "").trim();
+
+  // Sandbox requires token + projectId + teamId as a complete explicit tuple.
+  // In Vercel production, omit the tuple and let @vercel/sandbox obtain its
+  // short-lived OIDC credentials automatically for the current project.
+  if (token && projectId && teamId) {
+    return { token, projectId, teamId };
+  }
+
+  return {};
 }
 
 function workerEnv() {
@@ -129,8 +139,6 @@ async function createOrResumeSandbox(shopId) {
   const auth = sandboxAuthOptions();
   const options = {
     name: safeSandboxName(shopId),
-    ...(SANDBOX_PROJECT_ID ? { projectId: SANDBOX_PROJECT_ID } : {}),
-    ...(SANDBOX_TEAM_ID ? { teamId: SANDBOX_TEAM_ID } : {}),
     persistent: true,
     timeout: SANDBOX_TIMEOUT_MS,
     snapshotExpiration: SANDBOX_SNAPSHOT_TTL_MS,
