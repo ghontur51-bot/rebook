@@ -510,14 +510,16 @@ function WhatsAppBlastModal({
                   <button
                     onClick={async () => {
                       if (window.location.pathname.replace(/\/+$/, "") === "/demo" && !demoPinSaved) {
-                        setPopupData({ isOpen: true, title: "Demo WhatsApp PIN required", message: "Enter the private demo PIN in the field above before connecting your WhatsApp.", type: "warning" });
+                        setPopupData({ isOpen: true, title: "Demo WhatsApp PIN required", message: "Verify demo PIN 7439 before connecting the Vercel Sandbox WhatsApp worker.", type: "warning" });
                         return;
                       }
                       const result = await connectBridgeSession();
                       if (!result.success) {
                         setShowQrModal(false);
-                        setPopupData({ isOpen: true, title: "WhatsApp Connection", message: result.error || "Unable to start the WhatsApp session.", type: "error" });
+                        setPopupData({ isOpen: true, title: "Vercel Sandbox WhatsApp Connection", message: result.error || "Unable to start the Vercel Sandbox WhatsApp session.", type: "error" });
+                        return;
                       }
+                      setShowQrModal(true);
                     }}
                     style={{
                       background: "linear-gradient(135deg, #25D366, #128C7E)",
