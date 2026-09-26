@@ -87,7 +87,35 @@ function RouteResolver() {
 
   if (parts[0] === "superadmin") return <SuperAdmin />;
   if (parts[0] === "pay" && parts[1] && parts[2]) return <Payment shopId={parts[1]} cycleId={parts[2]} />;
-  if (parts[0] === "shop" && parts[1] && parts[2]) return <CloudShopApp shopId={parts[1]} accessToken={parts[2]} />;
+  if (parts[0] === "shop" && parts[1]) {
+    const shopId = decodeURIComponent(parts[1]);
+    const tokenFromUrl = parts[2] ? decodeURIComponent(parts[2]) : "";
+    const storageKey = `rebook_shop_access_${shopId}`;
+    let accessToken = tokenFromUrl;
+    try {
+      if (accessToken) {
+        sessionStorage.setItem(storageKey, accessToken);
+        window.history.replaceState({}, document.title, `/shop/${encodeURIComponent(shopId)}`);
+      } else {
+        accessToken = sessionStorage.getItem(storageKey) || "";
+      }
+    } catch {
+      accessToken = tokenFromUrl;
+    }
+
+    if (!accessToken) {
+      return (
+        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--background)", padding: 24 }}>
+          <div className="stat-card" style={{ maxWidth: 560, padding: 28 }}>
+            <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Shop access link required</div>
+            <div style={{ color: "var(--muted-foreground)", fontSize: 13 }}>Open the private ReBook shop link provided by your administrator.</div>
+          </div>
+        </div>
+      );
+    }
+
+    return <CloudShopApp shopId={shopId} accessToken={accessToken} />;
+  }
   if (path === "/about") return <About />;
   if (path === "/contact") return <Contact />;
   if (path === "/pricing") return <Pricing />;
