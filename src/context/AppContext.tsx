@@ -1376,7 +1376,7 @@ function checkAutomationConversions(
       if (run.customerId !== customerId) return false;
       if (run.bookingId !== undefined) return false;
       if (run.triggerBookingId === bookingId) return false;
-      if (run.status !== "sent" && run.status !== "recorded") return false;
+      if (run.status !== "queued" && run.status !== "sent" && run.status !== "recorded") return false;
       const triggerTime = new Date(run.triggeredAt).getTime();
       if (!Number.isFinite(triggerTime) || triggerTime > bookingTime) return false;
       const diffDays = (bookingTime - triggerTime) / 86400000;
