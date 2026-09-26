@@ -6,7 +6,7 @@ import { PopupCard, ConfirmDialog } from "../components/ModalCard";
 export default function Settings() {
   const { salon, updateSalon, notifications, updateNotifications, staff, addStaff, updateStaff, deleteStaff, resetAppData } = useApp();
   const [saved, setSaved] = useState(false);
-  const [plan] = useState({ name: "Pro", price: "₹1,499", renewal: "October 13, 2026", status: "Active" });
+  const [plan] = useState({ name: "ReBook Subscription", price: "Managed by billing", renewal: "See billing page", status: "Active" });
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({
     online: false,
     isReady: false,
@@ -147,8 +147,8 @@ export default function Settings() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {[
             { key: "whatsapp", label: "WhatsApp", desc: "Send automated messages via WhatsApp" },
-            { key: "sms", label: "SMS", desc: "Send automated messages via SMS" },
-            { key: "email", label: "Email", desc: "Send automated messages via Email" },
+            { key: "sms", label: "SMS", desc: "Provider not connected" },
+            { key: "email", label: "Email", desc: "Provider not connected" },
             { key: "dailySummary", label: "Daily Summary", desc: "Receive a daily performance summary" },
           ].map(n => (
             <div key={n.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#F8FAFC", borderRadius: 10 }}>
@@ -157,7 +157,7 @@ export default function Settings() {
                 <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>{n.desc}</div>
               </div>
               <label className="toggle">
-                <input type="checkbox" checked={(notifications as any)[n.key]} onChange={() => updateNotifications({ [n.key]: !(notifications as any)[n.key] })} />
+                <input type="checkbox" disabled={n.key === "sms" || n.key === "email"} checked={(notifications as any)[n.key]} onChange={() => updateNotifications({ [n.key]: !(notifications as any)[n.key] })} />
                 <span className="toggle-slider" />
               </label>
             </div>
@@ -172,10 +172,10 @@ export default function Settings() {
             <span style={{ fontSize: 22 }}>📱</span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-                WhatsApp Web Automation Bridge (Cloud)
+                WhatsApp Web Automation · Vercel Sandbox
               </div>
               <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-                Provides local WhatsApp Web sending for opted-in customers
+                Runs the WhatsApp Web worker inside ReBook's Vercel Sandbox runtime for opted-in customers
               </div>
             </div>
           </div>
@@ -206,7 +206,7 @@ export default function Settings() {
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
             <div style={{ fontSize: 12, color: "var(--foreground)" }}>
-              Command to start bridge: <code style={{ background: "#E2E8F0", padding: "3px 8px", borderRadius: 6, fontWeight: 700, color: "#0F172A" }}>npm run wa-bridge</code>
+              <div style={{ fontSize: 12, color: "var(--foreground)" }}>Worker runtime: <strong>Vercel Sandbox</strong></div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
@@ -221,10 +221,10 @@ export default function Settings() {
                   setBridgeStatus(s);
                   setPopupData({
                     isOpen: true,
-                    title: "Bridge Status Refreshed",
+                    title: "Sandbox Worker Status Refreshed",
                     message: s.online
-                      ? (s.isReady ? `Bridge is active and connected as ${s.clientInfo?.name || "WhatsApp User"}.` : "Bridge is running. QR code is ready to scan.")
-                      : "Bridge server is currently offline on port 5001. Run 'npm run wa-bridge' in your terminal.",
+                      ? (s.isReady ? `Sandbox worker is active and connected as ${s.clientInfo?.name || "WhatsApp User"}.` : "Sandbox worker is running. QR code is ready to scan.")
+                      : "Vercel Sandbox worker is currently unavailable. Refresh and try connecting again.",
                     type: s.online ? "info" : "warning"
                   });
                 }}
