@@ -12,6 +12,7 @@ import Settings from "./pages/Settings";
 import SuperAdmin from "./pages/SuperAdmin";
 import Payment from "./pages/Payment";
 import ShopFrozen from "./pages/ShopFrozen";
+import { About, Contact, Pricing, Privacy, PublicHome, RefundPolicy, Security, Terms } from "./pages/PublicPages";
 import { AppProvider, useApp } from "./context/AppContext";
 import { ShopRuntimeProvider, useShopRuntime } from "./context/ShopRuntimeContext";
 
@@ -72,22 +73,30 @@ function CloudShopGate() {
     return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--background)", padding: 24 }}><div className="stat-card" style={{ maxWidth: 560, padding: 28 }}><div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Shop unavailable</div><div style={{ color: "var(--muted-foreground)", fontSize: 13 }}>{error || "Invalid shop link."}</div></div></div>;
   }
 
-  if (runtime.shop.status !== "active") {
-    return <ShopFrozen shop={runtime.shop} onRefresh={() => void refresh()} />;
-  }
-
+  if (runtime.shop.status !== "active") return <ShopFrozen shop={runtime.shop} onRefresh={() => void refresh()} />;
   return <AppProvider runtime={runtime}><AppContent /></AppProvider>;
 }
 
+function DemoApp() {
+  return <AppProvider><AppContent /></AppProvider>;
+}
+
 function RouteResolver() {
-  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const path = window.location.pathname.replace(//+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
 
   if (parts[0] === "superadmin") return <SuperAdmin />;
   if (parts[0] === "pay" && parts[1] && parts[2]) return <Payment shopId={parts[1]} cycleId={parts[2]} />;
   if (parts[0] === "shop" && parts[1] && parts[2]) return <CloudShopApp shopId={parts[1]} accessToken={parts[2]} />;
-
-  return <AppProvider><AppContent /></AppProvider>;
+  if (path === "/about") return <About />;
+  if (path === "/contact") return <Contact />;
+  if (path === "/pricing") return <Pricing />;
+  if (path === "/terms") return <Terms />;
+  if (path === "/privacy-policy") return <Privacy />;
+  if (path === "/refund-policy") return <RefundPolicy />;
+  if (path === "/security") return <Security />;
+  if (path === "/demo") return <DemoApp />;
+  return <PublicHome />;
 }
 
 export default function App() {
