@@ -31,6 +31,8 @@ const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || '';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
+const WHATSAPP_BRIDGE_BASE_URL = String(process.env.WHATSAPP_BRIDGE_BASE_URL || '').replace(/\/$/, '');
+const WHATSAPP_BRIDGE_SECRET = String(process.env.WHATSAPP_BRIDGE_SECRET || '');
 
 const CENTRAL_SERVICE_ACCOUNT_JSON = process.env.CENTRAL_FIREBASE_SERVICE_ACCOUNT_JSON || '';
 const CENTRAL_PROJECT_ID = process.env.CENTRAL_FIREBASE_PROJECT_ID || '';
@@ -376,7 +378,35 @@ function hashEqual(a, b) {
   return ah.length === bh.length && crypto.timingSafeEqual(ah, bh);
 }
 
-async function requireShopAccess(req, res, next) {
+async async function whatsappBridgeFetch(pathname, options = {}) {
+  if (!WHATSAPP_BRIDGE_BASE_URL || !WHATSAPP_BRIDGE_SECRET) {
+    fail(503, 'WhatsApp worker is not configured.');
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_BRIDGE_TIMEOUT_MS || 12000));
+  try {
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${WHATSAPP_BRIDGE_SECRET}`);
+    headers.set('Content-Type', 'application/json');
+    const response = await fetch(`${WHATSAPP_BRIDGE_BASE_URL}${pathname}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+    const bodyText = await response.text();
+    let body = {};
+    try { body = bodyText ? JSON.parse(bodyText) : {}; } catch { body = { error: bodyText || 'Invalid worker response.' }; }
+    if (!response.ok) fail(response.status >= 500 ? 503 : response.status, body.error || 'WhatsApp worker request failed.');
+    return body;
+  } catch (error) {
+    if (error.name === 'AbortError') fail(504, 'WhatsApp worker request timed out.');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function requireShopAccess(req, res, next) {
   try {
     const shopId = req.params.shopId;
     const token = String(req.headers['x-shop-access-token'] || '');
@@ -725,6 +755,63 @@ app.post('/api/razorpay/webhook', async (req, res, next) => {
     const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
     await processWebhook(raw, req.headers['x-razorpay-signature']);
     res.json({ received: true });
+  } catch (e) { next(e); }
+});
+
+// WhatsApp worker proxy. The browser never talks directly to Oracle.
+app.get('/api/shop/:shopId/whatsapp/status', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch(`/api/status?shopId=${encodeURIComponent(req.params.shopId)}`, { method: 'GET' });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/connect', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/connect', { method: 'POST', body: JSON.stringify({ shopId: req.params.shopId }) });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/send-single', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/send-single', { method: 'POST', body: JSON.stringify({ ...(req.body || {}), shopId: req.params.shopId }) });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/blast', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/blast', { method: 'POST', body: JSON.stringify({ ...(req.body || {}), shopId: req.params.shopId }) });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.get('/api/shop/:shopId/whatsapp/blast/progress', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch(`/api/blast/progress?shopId=${encodeURIComponent(req.params.shopId)}`, { method: 'GET' });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/blast/cancel', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/blast/cancel', { method: 'POST', body: JSON.stringify({ shopId: req.params.shopId }) });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/reset', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/reset', { method: 'POST', body: JSON.stringify({ shopId: req.params.shopId }) });
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+app.post('/api/shop/:shopId/whatsapp/disconnect', requireShopAccess, async (req, res, next) => {
+  try {
+    const data = await whatsappBridgeFetch('/api/disconnect', { method: 'POST', body: JSON.stringify({ shopId: req.params.shopId }) });
+    res.json(data);
   } catch (e) { next(e); }
 });
 
