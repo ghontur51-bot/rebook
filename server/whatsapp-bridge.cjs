@@ -1,35 +1,54 @@
-﻿/**
- * WhatsApp Web Automation Bridge Server for ReBook SaaS Dashboard
- * Powered by whatsapp-web.js + Express
- * 
- * - NO API Keys Required.
- * - Uses your local WhatsApp Web session.
- * - 100% automated background sending with zero keyboard/mouse clicks.
- */
-
 const express = require("express");
 const cors = require("cors");
 const QRCode = require("qrcode");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
+const crypto = require("crypto");
+
+try {
+  if (typeof process.loadEnvFile === "function") process.loadEnvFile();
+} catch (_) {}
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || process.env.PORT || 5001);
 const AUTH_DIR = path.join(os.homedir(), ".rebook_wwebjs_auth");
+const SUPPRESSION_FILE = path.join(AUTH_DIR, "rebook_suppressed_numbers.json");
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:8443",
+  "http://localhost:5173",
+  "http://localhost:4173",
+  "https://rebook-rho.vercel.app",
+];
+const ALLOWED_ORIGINS = String(process.env.REBOOK_WHATSAPP_ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS.join(","))
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const DEFAULT_COUNTRY_CODE = String(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91").replace(/\D/g, "") || "91";
+const MAX_RECIPIENTS_PER_BLAST = Math.max(1, Math.min(Number(process.env.WHATSAPP_MAX_RECIPIENTS || 100), 500));
+const MAX_MESSAGE_LENGTH = 4096;
+const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+const OPT_OUT_WORDS = new Set(["stop", "unsubscribe", "unsub", "opt out", "optout", "remove", "do not message", "don't message"]);
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    return callback(new Error("Origin not allowed by ReBook WhatsApp Bridge."));
+  },
+  credentials: false,
+}));
+app.use(express.json({ limit: "256kb" }));
 
-// State
 let client = null;
 let qrDataUrl = null;
 let qrAscii = null;
 let isReady = false;
 let clientInfo = null;
 let initializationError = null;
+let connectionState = "UNLAUNCHED";
+let suppressedNumbers = new Set();
+let recentSends = new Map();
 
-// Blast Queue State
 let activeBlast = {
   isRunning: false,
   campaignName: "",
@@ -37,20 +56,158 @@ let activeBlast = {
   sentCount: 0,
   failedCount: 0,
   currentIndex: -1,
-  results: [], // array of { id, name, phone, status: "pending"|"sending"|"sent"|"failed", error?: string }
-  cancelled: false
+  results: [],
+  cancelled: false,
 };
 
-// Initialize WhatsApp Web Client
+function ensureAuthDir() {
+  if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
+function loadSuppressed() {
+  ensureAuthDir();
+  try {
+    const raw = fs.readFileSync(SUPPRESSION_FILE, "utf8");
+    const list = JSON.parse(raw);
+    if (Array.isArray(list)) suppressedNumbers = new Set(list.map((value) => String(value)));
+  } catch (_) {
+    suppressedNumbers = new Set();
+  }
+}
+
+function saveSuppressed() {
+  ensureAuthDir();
+  fs.writeFileSync(SUPPRESSION_FILE, JSON.stringify([...suppressedNumbers].sort(), null, 2), "utf8");
+}
+
+function cleanupRecentSends() {
+  const cutoff = Date.now() - DUPLICATE_WINDOW_MS;
+  for (const [key, time] of recentSends) {
+    if (time < cutoff) recentSends.delete(key);
+  }
+}
+
+function normalizePhone(phone) {
+  let digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) throw new Error("Phone number is required.");
+  if (digits.length === 10) digits = DEFAULT_COUNTRY_CODE + digits;
+  if (digits.length < 11 || digits.length > 15) {
+    throw new Error("Use a valid international phone number, including country code.");
+  }
+  return digits;
+}
+
+function jidFromPhone(phone) {
+  return normalizePhone(phone) + "@c.us";
+}
+
+function assertMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) throw new Error("Message cannot be empty.");
+  if (text.length > MAX_MESSAGE_LENGTH) throw new Error(`Message is too long. Maximum is ${MAX_MESSAGE_LENGTH} characters.`);
+  return text;
+}
+
+function assertReady() {
+  if (!client || !isReady) throw new Error("WhatsApp is not connected. Start the bridge and scan the QR code first.");
+}
+
+function assertBlastPermission(consentConfirmed) {
+  if (consentConfirmed !== true) {
+    throw new Error("Sending is blocked until you confirm that every recipient has explicitly opted in to receive WhatsApp messages from this business.");
+  }
+}
+
+function duplicateKey(jid, message) {
+  return crypto.createHash("sha256").update(jid + "\0" + message).digest("hex");
+}
+
+function registerRecentSend(jid, message) {
+  cleanupRecentSends();
+  const key = duplicateKey(jid, message);
+  const previous = recentSends.get(key);
+  if (previous && Date.now() - previous < DUPLICATE_WINDOW_MS) {
+    throw new Error("Duplicate message blocked because the same recipient and message were sent recently.");
+  }
+  recentSends.set(key, Date.now());
+}
+
+async function assertRegisteredRecipient(phoneDigits) {
+  const id = await client.getNumberId(phoneDigits);
+  if (!id) throw new Error("This phone number is not registered on WhatsApp.");
+  return id._serialized || String(id);
+}
+
+function addSuppression(jid) {
+  const normalized = String(jid).replace("@c.us", "");
+  if (!normalized) return;
+  suppressedNumbers.add(normalized);
+  saveSuppressed();
+}
+
+function clearRuntimeState() {
+  qrDataUrl = null;
+  qrAscii = null;
+  isReady = false;
+  clientInfo = null;
+  initializationError = null;
+  connectionState = "UNLAUNCHED";
+}
+
+async function sendCompliantMessage({ phone, message, name }) {
+  assertReady();
+  const text = assertMessage(message);
+  const phoneDigits = normalizePhone(phone);
+  const jid = phoneDigits + "@c.us";
+
+  if (suppressedNumbers.has(phoneDigits)) {
+    throw new Error("This recipient is on the WhatsApp suppression list.");
+  }
+
+  registerRecentSend(jid, text);
+  await assertRegisteredRecipient(phoneDigits);
+
+  const firstName = String(name || "there").trim().split(/\s+/)[0] || "there";
+  const personalizedMsg = text.replace(/\{name\}/gi, firstName);
+
+  try {
+    const sentMessage = await client.sendMessage(jid, personalizedMsg);
+    return {
+      messageId: sentMessage?.id?._serialized || null,
+      status: "submitted",
+      phone: phoneDigits,
+    };
+  } catch (error) {
+    cleanupRecentSends();
+    const key = duplicateKey(jid, text);
+    recentSends.delete(key);
+    throw error;
+  }
+}
+
+function resetBlastState() {
+  activeBlast = {
+    isRunning: false,
+    campaignName: "",
+    total: 0,
+    sentCount: 0,
+    failedCount: 0,
+    currentIndex: -1,
+    results: [],
+    cancelled: false,
+  };
+}
+
 function initWhatsAppClient() {
   try {
     const { Client, LocalAuth } = require("whatsapp-web.js");
 
-    console.log("🚀 Initializing WhatsApp Web Client at:", AUTH_DIR);
+    ensureAuthDir();
+    loadSuppressed();
+    clearRuntimeState();
+
     client = new Client({
-      authStrategy: new LocalAuth({
-        dataPath: AUTH_DIR
-      }),
+      authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
       puppeteer: {
         headless: true,
         args: [
@@ -66,78 +223,84 @@ function initWhatsAppClient() {
           "--disable-renderer-backgrounding",
           "--disable-ipc-flooding-protection",
           "--mute-audio",
-          "--disable-extensions"
-        ]
-      }
+          "--disable-extensions",
+        ],
+      },
     });
 
     client.on("qr", async (qr) => {
-      console.log("\n📱 WhatsApp Web QR Code Received! Scan it with your phone:\n");
-      try {
-        const qrcodeTerminal = require("qrcode-terminal");
-        qrcodeTerminal.generate(qr, { small: true });
-      } catch (e) {
-        console.log("QR Data:", qr);
-      }
       qrAscii = qr;
-      try {
-        qrDataUrl = await QRCode.toDataURL(qr);
-      } catch (err) {
-        console.error("Failed to generate QR data URL", err);
-      }
       isReady = false;
+      connectionState = "PAIRING";
+      try {
+        qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 360 });
+      } catch (error) {
+        initializationError = "Unable to generate pairing QR.";
+        console.error(error);
+      }
+    });
+
+    client.on("authenticated", () => {
+      initializationError = null;
     });
 
     client.on("ready", () => {
       isReady = true;
+      connectionState = "CONNECTED";
       qrDataUrl = null;
       qrAscii = null;
       clientInfo = client.info;
-      console.log("✅ WhatsApp Web Client is READY! Connected as:", client.info?.pushname || "WhatsApp User");
+      console.log("WhatsApp bridge ready:", client.info?.pushname || "WhatsApp User");
     });
 
-    client.on("authenticated", () => {
-      console.log("🔓 WhatsApp Web Authenticated successfully.");
+    client.on("change_state", (state) => {
+      connectionState = String(state);
+      if (state !== "CONNECTED") isReady = false;
     });
 
-    client.on("auth_failure", (msg) => {
-      console.error("❌ Authentication failed:", msg);
+    client.on("auth_failure", (message) => {
       isReady = false;
-      initializationError = "Auth failure: " + msg;
+      connectionState = "AUTH_FAILURE";
+      initializationError = "WhatsApp authentication failed. Please reset the bridge and scan a new QR code.";
+      console.error("WhatsApp auth failure:", message);
+    });
+
+    client.on("message", (message) => {
+      try {
+        if (!message?.from || message.fromMe || !message.body) return;
+        const normalized = String(message.body).trim().toLowerCase().replace(/\s+/g, " ");
+        if (OPT_OUT_WORDS.has(normalized) || [...OPT_OUT_WORDS].some((word) => normalized === word)) {
+          addSuppression(String(message.from));
+          console.log("WhatsApp opt-out recorded:", message.from);
+        }
+      } catch (error) {
+        console.warn("Could not process WhatsApp opt-out message:", error.message);
+      }
     });
 
     client.on("disconnected", (reason) => {
-      console.log("⚠️ WhatsApp Client disconnected:", reason);
-      isReady = false;
-      clientInfo = null;
+      console.warn("WhatsApp disconnected:", reason);
+      clearRuntimeState();
+      connectionState = String(reason || "DISCONNECTED");
     });
 
-    client.initialize().catch((err) => {
-      console.error("Error during client.initialize():", err.message);
-      initializationError = err.message;
+    client.initialize().catch((error) => {
+      clearRuntimeState();
+      initializationError = error.message || "Unable to initialize WhatsApp Web.";
+      console.error("WhatsApp initialize error:", error);
     });
-
-  } catch (err) {
-    console.warn("⚠️ whatsapp-web.js or dependencies not installed yet. Run: npm install whatsapp-web.js qrcode express cors");
-    initializationError = err.message;
+  } catch (error) {
+    clearRuntimeState();
+    initializationError = error.message || "whatsapp-web.js is not installed.";
+    console.error("WhatsApp bridge initialization error:", error);
   }
 }
 
-// Clean phone number for WhatsApp: only digits + country code (default 91 for 10-digit Indian numbers)
-function formatWhatsAppNumber(phone) {
-  let cleaned = String(phone).replace(/\D/g, "");
-  if (cleaned.length === 10) {
-    cleaned = "91" + cleaned; // default India code if 10 digits
-  }
-  if (cleaned.length < 10 || cleaned.length > 15) {
-    throw new Error("A valid phone number with country code is required.");
-  }
-  return cleaned + "@c.us";
-}
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "rebook-whatsapp-bridge", port: PORT });
+});
 
-// Routes
-// 1. Health & Status
-app.get("/api/status", (req, res) => {
+app.get("/api/status", (_req, res) => {
   res.json({
     online: true,
     isReady,
@@ -145,223 +308,187 @@ app.get("/api/status", (req, res) => {
     qrDataUrl,
     clientInfo: isReady ? {
       name: clientInfo?.pushname || "Connected User",
-      phone: clientInfo?.wid?.user || "WhatsApp Connected"
+      phone: clientInfo?.wid?.user || "WhatsApp Connected",
     } : null,
+    connectionState,
     initializationError,
+    suppressionCount: suppressedNumbers.size,
     activeBlast: {
       isRunning: activeBlast.isRunning,
       total: activeBlast.total,
       sentCount: activeBlast.sentCount,
-      currentIndex: activeBlast.currentIndex
-    }
+      failedCount: activeBlast.failedCount,
+      currentIndex: activeBlast.currentIndex,
+    },
   });
 });
 
-// 2. Start Automated Blast
+app.get("/api/suppression", (_req, res) => {
+  res.json({ count: suppressedNumbers.size });
+});
+
 app.post("/api/blast", async (req, res) => {
-  const { recipients, message, campaignName, delayMs = 3000 } = req.body;
+  const { recipients, message, campaignName, consentConfirmed } = req.body || {};
 
-  if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-    return res.status(400).json({ error: "Recipients list is required." });
-  }
+  try {
+    assertBlastPermission(consentConfirmed);
+    assertReady();
+    const text = assertMessage(message);
 
-  if (activeBlast.isRunning) {
-    return res.status(409).json({ error: "A blast campaign is already in progress." });
-  }
+    if (!Array.isArray(recipients) || recipients.length === 0) throw new Error("Recipients list is required.");
+    if (recipients.length > MAX_RECIPIENTS_PER_BLAST) throw new Error(`This bridge allows at most ${MAX_RECIPIENTS_PER_BLAST} recipients per blast.`);
+    if (activeBlast.isRunning) return res.status(409).json({ error: "A blast campaign is already in progress." });
 
-  if (!isReady || !client) {
-    return res.status(503).json({
-      error: "WhatsApp Web is not authenticated yet. Please scan the QR code first."
+    const seen = new Set();
+    const cleanedRecipients = recipients.map((recipient, index) => {
+      const phone = normalizePhone(recipient?.phone);
+      if (seen.has(phone)) throw new Error(`Duplicate recipient detected: ${phone}.`);
+      seen.add(phone);
+      return {
+        id: recipient?.id ?? index,
+        name: String(recipient?.name || "Customer"),
+        phone,
+        status: "pending",
+        error: null,
+      };
     });
-  }
 
-  // Setup blast state
-  activeBlast = {
-    isRunning: true,
-    campaignName: campaignName || "Automated Blast",
-    total: recipients.length,
-    sentCount: 0,
-    failedCount: 0,
-    currentIndex: -1,
-    results: recipients.map((r, index) => ({
-      id: r.id || index,
-      name: r.name,
-      phone: r.phone,
-      status: "pending",
-      error: null
-    })),
-    cancelled: false
-  };
-
-  res.json({
-    success: true,
-    message: "Automated blast started in the background!",
-    total: recipients.length
-  });
-
-  // Run the blast loop in the background
-  (async () => {
-    console.log(`\n🚀 Starting Automated WhatsApp Blast: ${activeBlast.total} recipients`);
-
-    for (let i = 0; i < activeBlast.results.length; i++) {
-      if (activeBlast.cancelled) {
-        console.log("⏹️ Blast was cancelled by user.");
-        break;
-      }
-
-      activeBlast.currentIndex = i;
-      const target = activeBlast.results[i];
-      target.status = "sending";
-
-      // Personalize message: replace {name}
-      const firstName = (target.name || "there").split(" ")[0];
-      const personalizedMsg = (message || "Hi {name}!").replace(/\{name\}/gi, firstName);
-
-      try {
-        const formattedNumber = formatWhatsAppNumber(target.phone);
-        console.log(`[${i + 1}/${activeBlast.total}] Sending to ${target.name} (${formattedNumber})...`);
-
-        // Zero keyboard interaction: programmatically delivered by WhatsApp Web client
-        await client.sendMessage(formattedNumber, personalizedMsg);
-
-        target.status = "sent";
-        activeBlast.sentCount++;
-        console.log(`✅ [${i + 1}/${activeBlast.total}] Delivered to ${target.name}!`);
-      } catch (err) {
-        console.error(`❌ Failed sending to ${target.name}:`, err.message);
-        target.status = "failed";
-        target.error = err.message || "Failed to send";
-        activeBlast.failedCount++;
-      }
-
-      // Anti-ban humanized random delay between sends
-      if (i < activeBlast.results.length - 1 && !activeBlast.cancelled) {
-        const jitter = Math.floor(Math.random() * 1500);
-        const waitTime = Math.max(1500, delayMs) + jitter;
-        await new Promise((r) => setTimeout(r, waitTime));
-      }
-    }
-
-    activeBlast.isRunning = false;
-    console.log(`🏁 Blast finished! Sent: ${activeBlast.sentCount}, Failed: ${activeBlast.failedCount}\n`);
-  })();
-});
-
-// 3. Blast Progress
-app.get("/api/blast/progress", (req, res) => {
-  res.json(activeBlast);
-});
-
-// 4. Cancel Blast
-app.post("/api/blast/cancel", (req, res) => {
-  if (activeBlast.isRunning) {
-    activeBlast.cancelled = true;
-    return res.json({ success: true, message: "Blast cancellation requested." });
-  }
-  res.json({ success: true, message: "No active blast was running." });
-});
-
-// 5. Send single message
-app.post("/api/send-single", async (req, res) => {
-  const { phone, message, name } = req.body;
-  if (!phone || !message) {
-    return res.status(400).json({ error: "Phone and message are required." });
-  }
-
-  const firstName = (name || "there").split(" ")[0];
-  const personalizedMsg = message.replace(/\{name\}/gi, firstName);
-  const formattedNumber = formatWhatsAppNumber(phone);
-
-  try {
-    if (!client || !isReady) {
-      return res.status(503).json({ error: "WhatsApp Web is not authenticated yet. Please scan the QR code first." });
-    }
-    await client.sendMessage(formattedNumber, personalizedMsg);
-    return res.json({ success: true, message: "Message sent automatically!" });
-  } catch (err) {
-    return res.status(500).json({ error: err.message || "Failed to send message" });
-  }
-});
-
-// 6. Reset / Disconnect WhatsApp Session (Wipes linked account and local auth data)
-app.post(["/api/reset", "/api/logout", "/api/disconnect"], async (req, res) => {
-  console.log("🔄 Reset requested: Clearing WhatsApp session and linked credentials...");
-
-  try {
-    // 1. Cancel active blast if running
-    if (activeBlast.isRunning) {
-      activeBlast.cancelled = true;
-      activeBlast.isRunning = false;
-    }
-
-    // 2. Destroy existing WhatsApp client instance cleanly
-    if (client) {
-      try {
-        await client.logout().catch(() => {});
-      } catch (e) {}
-      try {
-        await client.destroy().catch(() => {});
-      } catch (e) {}
-      client = null;
-    }
-
-    // 3. Reset internal status
-    isReady = false;
-    clientInfo = null;
-    qrDataUrl = null;
-    qrAscii = null;
-    initializationError = null;
+    resetBlastState();
     activeBlast = {
-      isRunning: false,
-      campaignName: "",
-      total: 0,
+      isRunning: true,
+      campaignName: String(campaignName || "WhatsApp Campaign"),
+      total: cleanedRecipients.length,
       sentCount: 0,
       failedCount: 0,
       currentIndex: -1,
-      results: [],
-      cancelled: false
+      results: cleanedRecipients,
+      cancelled: false,
     };
 
-    // 4. Brief delay to release file locks on Windows
-    await new Promise((r) => setTimeout(r, 600));
+    res.json({ success: true, total: cleanedRecipients.length });
 
-    // 5. Recursively wipe auth folder
-    if (fs.existsSync(AUTH_DIR)) {
-      try {
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
-        console.log("🗑️ Deleted WhatsApp auth directory:", AUTH_DIR);
-      } catch (fsErr) {
-        console.warn("Could not delete entire auth dir immediately:", fsErr.message);
+    (async () => {
+      for (let index = 0; index < activeBlast.results.length; index += 1) {
+        if (activeBlast.cancelled) break;
+
+        const target = activeBlast.results[index];
+        activeBlast.currentIndex = index;
+        target.status = "sending";
+
+        try {
+          const result = await sendCompliantMessage({
+            phone: target.phone,
+            message: text,
+            name: target.name,
+          });
+          target.status = "sent";
+          target.messageId = result.messageId;
+          activeBlast.sentCount += 1;
+        } catch (error) {
+          target.status = "failed";
+          target.error = error.message || "Unable to send.";
+          activeBlast.failedCount += 1;
+        }
+
+        // Fixed operational pacing; this is not intended to bypass platform enforcement.
+        if (index < activeBlast.results.length - 1 && !activeBlast.cancelled) {
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
       }
-    }
 
-    // 6. Re-initialize a fresh client to generate a new QR code for the user
-    setTimeout(() => {
-      console.log("🚀 Spawning fresh WhatsApp client instance...");
-      initWhatsAppClient();
-    }, 500);
-
-    return res.json({
-      success: true,
-      message: "WhatsApp linked session and credentials deleted successfully. Generating fresh QR code."
+      activeBlast.isRunning = false;
+      activeBlast.currentIndex = -1;
+    })().catch((error) => {
+      activeBlast.isRunning = false;
+      console.error("Blast worker failed:", error);
     });
-  } catch (err) {
-    console.error("Error during session reset:", err);
-    return res.status(500).json({
-      success: false,
-      error: err.message || "Failed to reset session"
-    });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Unable to start WhatsApp blast." });
   }
 });
 
-// Start Express Server
-app.listen(PORT, () => {
-  console.log(`\n=================================================`);
-  console.log(` ReBook WhatsApp Automation Bridge (Local Service)`);
-  console.log(` Port: http://localhost:${PORT}`);
-  console.log(` Status: http://localhost:${PORT}/api/status`);
-  console.log(` Zero API Keys needed - direct WhatsApp Web`);
-  console.log(`=================================================\n`);
+app.get("/api/blast/progress", (_req, res) => {
+  res.json(activeBlast);
+});
 
+app.post("/api/blast/cancel", (_req, res) => {
+  if (!activeBlast.isRunning) return res.json({ success: true, message: "No active blast was running." });
+  activeBlast.cancelled = true;
+  res.json({ success: true, message: "Cancellation requested. The current message will finish before the queue stops." });
+});
+
+app.post("/api/send-single", async (req, res) => {
+  const { phone, message, name, consentConfirmed } = req.body || {};
+  try {
+    assertReady();
+    assertBlastPermission(consentConfirmed);
+    const result = await sendCompliantMessage({ phone, message, name });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    const status = String(error.message || "").includes("suppression") ? 409 : 400;
+    res.status(status).json({ success: false, error: error.message || "Failed to send message." });
+  }
+});
+
+app.post("/api/reset", async (_req, res) => {
+  try {
+    if (activeBlast.isRunning) activeBlast.cancelled = true;
+
+    if (client) {
+      try { await client.logout(); } catch (_) {}
+      try { await client.destroy(); } catch (_) {}
+    }
+
+    client = null;
+    resetBlastState();
+    clearRuntimeState();
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    }
+
+    suppressedNumbers = new Set();
+    recentSends = new Map();
+
+    setTimeout(initWhatsAppClient, 700);
+
+    res.json({ success: true, message: "WhatsApp session and local bridge credentials were deleted. A fresh QR will be generated." });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "Failed to reset WhatsApp bridge." });
+  }
+});
+
+app.post(["/api/logout", "/api/disconnect"], async (_req, res) => {
+  try {
+    if (client) {
+      try { await client.logout(); } catch (_) {}
+    }
+    clearRuntimeState();
+    resetBlastState();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "Failed to disconnect." });
+  }
+});
+
+const shutdown = async () => {
+  try {
+    if (client) await client.destroy();
+  } catch (_) {}
+  process.exit(0);
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+app.listen(PORT, () => {
+  loadSuppressed();
+  console.log("=================================================");
+  console.log(" ReBook WhatsApp Automation Bridge");
+  console.log(` Port: http://localhost:${PORT}`);
+  console.log(" Requires explicit WhatsApp opt-in for sending");
+  console.log("=================================================");
   initWhatsAppClient();
 });
