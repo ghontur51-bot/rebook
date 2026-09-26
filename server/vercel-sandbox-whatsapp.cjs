@@ -10,7 +10,7 @@ const SANDBOX_SNAPSHOT_TTL_MS = Number(process.env.REBOOK_SANDBOX_SNAPSHOT_TTL_M
 const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
-const WORKER_VERSION = "2026-09-26-sandbox-v2";
+const WORKER_VERSION = "2026-09-26-sandbox-v3";
 function deriveInternalSecret(label) {
   const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
   if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
@@ -211,6 +211,7 @@ async function createOrResumeSandbox(shopId) {
 
   return sdk.Sandbox.getOrCreate({
     ...options,
+    resume: true,
     onCreate: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
