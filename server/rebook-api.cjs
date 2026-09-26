@@ -575,10 +575,10 @@ function calendarDaysBetween(a, b) {
 
 function parseDateParts(value, timezone) {
   const text = String(value || '').slice(0, 10);
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(text)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
   const [year, month, day] = text.split('-').map(Number);
   if (!year || !month || !day) return null;
-  return { year, month, day, ...getLocalDateParts(new Date(`${text}T12:00:00Z`), timezone) };
+  return { year, month, day };
 }
 
 function addCalendarMonths(parts, months) {
@@ -620,8 +620,8 @@ function automationDedupeKey(auto, customer) {
 }
 
 function personalizeAutomationMessage(auto, customer) {
-  const firstName = String(customer.name || 'there').trim().split(/\\s+/)[0] || 'there';
-  return String(auto.message || '').replace(/\\{name\\}/gi, firstName);
+  const firstName = String(customer.name || 'there').trim().split(/\s+/)[0] || 'there';
+  return String(auto.message || '').replace(/\{name\}/gi, firstName);
 }
 
 function successfulAutomationRun(run) {
@@ -665,7 +665,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
         skippedNoConsent += 1;
         continue;
       }
-      if (!/^\\d{10}$/.test(String(customer.phone || '').replace(/\\D/g, '').slice(-10))) continue;
+      if (!/^\d{10}$/.test(String(customer.phone || '').replace(/\D/g, '').slice(-10))) continue;
       if (!automationRuleThresholdReached(customer, auto.trigger, now, schedule.timezone)) continue;
 
       const dedupeKey = automationDedupeKey(auto, customer);
@@ -741,8 +741,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   }));
 
   const mergedRuns = [...automationRuns, ...newRuns];
-  const automationUpdates = automations.map((auto) => automationStatsFor(auto, mergedRuns).replace ? auto : automationStatsFor(auto, mergedRuns));
-
   const writes = [
     ...newRuns.map((run) => makeUpdateWrite(projectId, 'automationRuns', sha256(`${run.dedupeKey}|${run.triggeredAt}`), run)),
     ...newMessages.map((message) => makeUpdateWrite(projectId, 'messages', message.__docId, message)),
@@ -1189,7 +1187,7 @@ app.post('/api/shop/:shopId/reset', requireShopAccess, async (req, res, next) =>
 
 app.get('/api/cron/automations', async (req, res, next) => {
   try {
-    const supplied = String(req.headers.authorization || '').replace(/^Bearer\\s+/i, '');
+    const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!CRON_SECRET || !hashEqual(supplied, CRON_SECRET)) return res.status(401).json({ error: 'Unauthorized.' });
     const results = await processAutomationSchedules();
     res.json({ success: true, results });
