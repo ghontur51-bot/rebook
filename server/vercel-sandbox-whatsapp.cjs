@@ -68,62 +68,55 @@ function readWorkerSource() {
   };
 }
 
-async function ensureChromeSystemDependencies(sandbox) {
-  const markerPath = path.posix.join(DATA_DIR, ".chrome-system-deps-ready");
-  const libraryCheck = await commandSucceeded(
-    sandbox,
-    "sh",
-    ["-lc", "ldconfig -p >/dev/null 2>&1 && ldconfig -p | grep -q 'libnss3.so' && ldconfig -p | grep -q 'libatk-1.0.so' && ldconfig -p | grep -q 'libgtk-3.so'"],
-    { cwd: WORKER_DIR }
-  );
-  if (libraryCheck) return;
+// IMPORTANT: this Vercel Function runs with maxDuration 60s (the Hobby/free-plan ceiling).
+// Installing the Chromium system libraries (dnf) and the npm dependencies (which pulls
+// Puppeteer's bundled Chromium download) reliably takes several minutes on a cold sandbox.
+// None of that work may block a request handler, or Vercel kills the invocation long before
+// the WhatsApp client can even launch a browser, so the "qr" event never fires. Instead we
+// write a single idempotent bootstrap script and launch it fully `detached` so it keeps
+// running inside the persistent Sandbox VM regardless of any individual request's lifetime.
+// Every request just asks "is it ready yet, and if so, please make sure it's running" —
+// none of them wait on the install itself.
+const BOOTSTRAP_LOCK = path.posix.join(DATA_DIR, ".bootstrap.lock");
+const BOOTSTRAP_DONE = path.posix.join(DATA_DIR, ".bootstrap.done");
+const BOOTSTRAP_SCRIPT_PATH = path.posix.join(WORKER_DIR, "bootstrap.sh");
 
-  const install = await sandbox.runCommand({
-    cmd: "dnf",
-    args: [
-      "install", "-y", "--setopt=install_weak_deps=False",
-      "ca-certificates",
-      "nss",
-      "atk",
-      "at-spi2-atk",
-      "gtk3",
-      "cups-libs",
-      "libXcomposite",
-      "libXdamage",
-      "libXrandr",
-      "libXScrnSaver",
-      "libXi",
-      "libXtst",
-      "pango",
-      "alsa-lib",
-      "libdrm",
-      "mesa-libgbm",
-      "libxkbcommon",
-      "fontconfig",
-      "freetype",
-      "harfbuzz",
-      "cairo",
-      "dbus-libs",
-    ],
-    cwd: WORKER_DIR,
-    sudo: true,
-  });
+function buildBootstrapScript() {
+  return `#!/bin/sh
+set -u
+cd "${WORKER_DIR}" || exit 1
+mkdir -p "${DATA_DIR}"
 
-  if (install.exitCode !== 0) {
-    const stderr = await install.stderr().catch(() => "");
-    throw new Error("Chromium system dependencies could not be installed: " + String(stderr).slice(-1200));
-  }
+if [ -f "${BOOTSTRAP_LOCK}" ]; then
+  exit 0
+fi
+touch "${BOOTSTRAP_LOCK}"
+trap 'rm -f "${BOOTSTRAP_LOCK}"' EXIT
 
-  await sandbox.runCommand({
-    cmd: "touch",
-    args: [markerPath],
-    cwd: WORKER_DIR,
-  });
-}
+if [ ! -f "${BOOTSTRAP_DONE}" ]; then
+  if ! (ldconfig -p 2>/dev/null | grep -q 'libnss3.so' && ldconfig -p 2>/dev/null | grep -q 'libatk-1.0.so' && ldconfig -p 2>/dev/null | grep -q 'libgtk-3.so'); then
+    dnf install -y --setopt=install_weak_deps=False \\
+      ca-certificates nss atk at-spi2-atk gtk3 cups-libs \\
+      libXcomposite libXdamage libXrandr libXScrnSaver libXi libXtst \\
+      pango alsa-lib libdrm mesa-libgbm libxkbcommon fontconfig freetype harfbuzz cairo dbus-libs \\
+      >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+  fi
 
-async function commandSucceeded(sandbox, cmd, args, options = {}) {
-  const result = await sandbox.runCommand({ cmd, args, ...options });
-  return result.exitCode === 0;
+  if [ ! -f node_modules/whatsapp-web.js/package.json ]; then
+    npm install --omit=dev --no-audit --no-fund >>/tmp/rebook-wa-install.log 2>&1 || exit 1
+  fi
+
+  touch "${BOOTSTRAP_DONE}"
+fi
+
+rm -f "${BOOTSTRAP_LOCK}"
+trap - EXIT
+
+if ! node -e "fetch('http://127.0.0.1:${WORKER_PORT}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+  pkill -f "node index.cjs" >/dev/null 2>&1 || true
+  exec node index.cjs >>/tmp/rebook-wa-worker.log 2>&1
+fi
+`;
 }
 
 async function writeWorkerFiles(sandbox) {
@@ -132,25 +125,8 @@ async function writeWorkerFiles(sandbox) {
     { path: path.posix.join(WORKER_DIR, "index.cjs"), content: Buffer.from(source.index) },
     { path: path.posix.join(WORKER_DIR, "package.json"), content: Buffer.from(source.packageJson) },
     { path: path.posix.join(WORKER_DIR, ".worker-version"), content: Buffer.from(WORKER_VERSION + "\n") },
+    { path: BOOTSTRAP_SCRIPT_PATH, content: Buffer.from(buildBootstrapScript()) },
   ]);
-}
-
-async function installWorkerDependenciesIfNeeded(sandbox) {
-  const packagePath = path.posix.join(WORKER_DIR, "node_modules", "whatsapp-web.js", "package.json");
-  const exists = await commandSucceeded(sandbox, "test", ["-f", packagePath], { cwd: WORKER_DIR });
-  if (exists) return true;
-
-  await sandbox.runCommand({
-    cmd: "sh",
-    args: [
-      "-lc",
-      "npm install --omit=dev --no-audit --no-fund >/tmp/rebook-wa-install.log 2>&1 && node index.cjs >>/tmp/rebook-wa-worker.log 2>&1",
-    ],
-    cwd: WORKER_DIR,
-    env: workerEnv(),
-    detached: true,
-  });
-  return false;
 }
 
 async function isWorkerHealthy(sandbox) {
@@ -158,7 +134,7 @@ async function isWorkerHealthy(sandbox) {
     cmd: "node",
     args: [
       "-e",
-      "fetch('http://127.0.0.1:5001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      `fetch('http://127.0.0.1:${WORKER_PORT}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`,
     ],
     cwd: WORKER_DIR,
     env: workerEnv(),
@@ -166,25 +142,24 @@ async function isWorkerHealthy(sandbox) {
   return result.exitCode === 0;
 }
 
-async function startWorker(sandbox, dependenciesReady) {
+// Kicks off (or resumes) provisioning without ever blocking the caller. Safe to call on
+// every request: if the worker is already healthy this is a fast no-op; if bootstrap is
+// already running in the background (lock file present) it's also a fast no-op; only a
+// genuinely idle sandbox launches a new detached bootstrap run.
+async function launchBootstrapIfNeeded(sandbox) {
   if (await isWorkerHealthy(sandbox)) return;
 
-  if (dependenciesReady) {
-    await sandbox.runCommand({
-      cmd: "node",
-      args: ["index.cjs"],
-      cwd: WORKER_DIR,
-      env: workerEnv(),
-      detached: true,
-    });
-  }
+  const lockPresent = await sandbox.runCommand({ cmd: "test", args: ["-f", BOOTSTRAP_LOCK], cwd: WORKER_DIR });
+  if (lockPresent.exitCode === 0) return;
 
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (await isWorkerHealthy(sandbox)) return;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  throw new Error("Vercel Sandbox WhatsApp worker is still starting. Please retry in a few seconds.");
+  await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", `sh ${BOOTSTRAP_SCRIPT_PATH} >>/tmp/rebook-wa-bootstrap.log 2>&1`],
+    cwd: WORKER_DIR,
+    env: workerEnv(),
+    sudo: true,
+    detached: true,
+  });
 }
 
 function safeSandboxName(shopId) {
@@ -215,16 +190,12 @@ async function createOrResumeSandbox(shopId) {
     onCreate: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
-      await ensureChromeSystemDependencies(sandbox);
-      const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
-      await startWorker(sandbox, dependenciesReady);
+      await launchBootstrapIfNeeded(sandbox);
     },
     onResume: async (sandbox) => {
       await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
       await writeWorkerFiles(sandbox);
-      await ensureChromeSystemDependencies(sandbox);
-      const dependenciesReady = await installWorkerDependenciesIfNeeded(sandbox);
-      await startWorker(sandbox, dependenciesReady);
+      await launchBootstrapIfNeeded(sandbox);
     },
   });
 }
@@ -297,6 +268,26 @@ async function sandboxWorkerFetch(pathname, options = {}) {
 
     return body;
   } catch (error) {
+    const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
+    const isConnectionIssue = error?.name === "AbortError" || !error?.status;
+
+    // The worker may simply not be listening yet because bootstrap (dnf/npm install) is
+    // still running in the background sandbox — that's expected and can take minutes on a
+    // cold start. Surface it as a normal "still starting" state so the UI's existing poll
+    // loop keeps waiting instead of showing a hard, retry-button error every few seconds.
+    if (isStatusOrConnect && isConnectionIssue) {
+      return {
+        success: true,
+        online: true,
+        isReady: false,
+        hasQr: false,
+        qrDataUrl: null,
+        clientInfo: null,
+        connectionState: "PROVISIONING",
+        initializationError: null,
+      };
+    }
+
     if (error && error.name === "AbortError") {
       const timeoutError = new Error("Vercel Sandbox WhatsApp worker is taking too long to start. Please retry in a few seconds.");
       timeoutError.status = 504;
