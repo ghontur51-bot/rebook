@@ -66,10 +66,7 @@
   "framework": "vite",
   "functions": {
     "api/index.js": {
-      "maxDuration": 60,
-      "includeFiles": [
-        "whatsapp-worker/**"
-      ]
+      "maxDuration": 60
     }
   }
 }
