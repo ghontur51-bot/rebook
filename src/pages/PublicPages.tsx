@@ -43,6 +43,7 @@ function Layout({ title, children }: { title: string; children: React.ReactNode 
         <div style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18 }}>
           <a href="/" style={{ ...linkStyle, fontWeight: 900, fontSize: 20 }}>ReBook</a>
           <nav style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "#475569" }}>
+            <a href="/demo" style={{ ...linkStyle, fontWeight: 800 }}>Live Demo</a>
             <a href="/pricing" style={linkStyle}>Pricing</a>
             <a href="/about" style={linkStyle}>About</a>
             <a href="/contact" style={linkStyle}>Contact</a>
@@ -104,8 +105,8 @@ export function PublicHome() {
             ReBook brings customer management, appointments, staff operations, follow-ups, campaigns and business analytics into one cloud workspace for growing salons.
           </p>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 26 }}>
-            <a href="/contact" className="btn-primary" style={{ ...linkStyle, display: "inline-block", padding: "12px 18px", borderRadius: 10 }}>Talk to ReBook</a>
-            <a href="/pricing" style={{ ...linkStyle, display: "inline-block", padding: "12px 18px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#fff" }}>View pricing</a>
+            <a href="/demo" className="btn-primary" style={{ ...linkStyle, display: "inline-block", padding: "12px 18px", borderRadius: 10 }}>Open Live Demo</a>
+            <a href="/contact" style={{ ...linkStyle, display: "inline-block", padding: "12px 18px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#fff" }}>Talk to ReBook</a>
           </div>
           <div style={{ marginTop: 18, fontSize: 12, color: "#64748b" }}>30-day subscription billing · Secure online checkout · Cloud-based business data</div>
         </div>
