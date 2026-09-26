@@ -772,7 +772,6 @@ function CampaignCard({ c, onSendWA, onView, customers, bookings }: any) {
   };
 
   const audience = resolveAudience(c.audience, customers, bookings);
-  const openRate = c.sent > 0 ? Math.round((c.opened / c.sent) * 100) : 0;
   const convRate = c.sent > 0 ? Math.round((c.converted / c.sent) * 100) : 0;
 
   return (
@@ -801,8 +800,8 @@ function CampaignCard({ c, onSendWA, onView, customers, bookings }: any) {
       {c.sent > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, paddingTop: 14, borderTop: "1px solid var(--border)", marginBottom: 14 }}>
           {[
-            { label: "Sent", value: c.sent },
-            { label: "Opened", value: `${openRate}%` },
+            { label: "Submitted", value: c.sent },
+            { label: "Recipients", value: audience.length },
             { label: "Converted", value: `${convRate}%` },
           ].map(s => (
             <div key={s.label} style={{ textAlign: "center" }}>
@@ -918,16 +917,10 @@ export default function Campaigns() {
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         {[
-          { label: "Total Sent", value: campaigns.reduce((s, c) => s + c.sent, 0).toLocaleString(), icon: "📤" },
-          { label: "Total Opened", value: campaigns.reduce((s, c) => s + c.opened, 0).toLocaleString(), icon: "👁️" },
+          { label: "Messages Submitted", value: campaigns.reduce((s, c) => s + c.sent, 0).toLocaleString(), icon: "📤" },
+          { label: "Opted-in Customers", value: customers.filter((c) => c.whatsappOptIn === true).length.toLocaleString(), icon: "✅" },
           { label: "Total Converted", value: campaigns.reduce((s, c) => s + c.converted, 0).toLocaleString(), icon: "🎯" },
-          {
-            label: "Avg Open Rate",
-            value: campaigns.reduce((s, c) => s + c.sent, 0) > 0
-              ? `${((campaigns.reduce((s, c) => s + c.opened, 0) / campaigns.reduce((s, c) => s + c.sent, 0)) * 100).toFixed(1)}%`
-              : "0.0%",
-            icon: "📈"
-          },
+          { label: "Active Campaigns", value: campaigns.filter((c) => c.status === "active" || c.status === "scheduled").length.toLocaleString(), icon: "📣" },
         ].map(s => (
           <div key={s.label} className="stat-card" style={{ padding: "18px 20px" }}>
             <div style={{ fontSize: 20, marginBottom: 6 }}>{s.icon}</div>
@@ -987,7 +980,7 @@ export default function Campaigns() {
                     <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Channel</label>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                       {[
-                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Highest open rate (98%)" },
+                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Opt-in required · local bridge" },
                         { id: "SMS", label: "SMS", icon: "💬", desc: "Reliable fallback" },
                         { id: "Email", label: "Email", icon: "✉️", desc: "Best for newsletters" },
                       ].map(ch => (
@@ -1060,6 +1053,12 @@ export default function Campaigns() {
                       </div>
                     ))}
                   </div>
+
+                  {form.channel === "WhatsApp" && form.scheduleDate && (
+                    <div style={{ marginTop: 12, padding: "12px 14px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 10, fontSize: 12, color: "#92400E" }}>
+                      WhatsApp scheduling is not executed by Vercel. The local WhatsApp bridge must be running at the scheduled time. Until a persistent scheduler is configured, treat this as a saved campaign plan rather than a guaranteed automated send.
+                    </div>
+                  )}
 
                   {form.channel === "WhatsApp" && (
                     <div style={{ marginTop: 16, padding: "12px 14px", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
