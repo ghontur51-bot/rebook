@@ -30,6 +30,10 @@ function resolveAudience(audience: string, customers: Customer[], bookings: Retu
   return customers.slice(0, Math.floor(customers.length * 0.4));
 }
 
+function resolveWhatsAppAudience(audience: string, customers: Customer[], bookings: ReturnType<typeof useApp>["bookings"]) {
+  return resolveAudience(audience, customers, bookings).filter((customer) => customer.whatsappOptIn === true && String(customer.phone || "").trim());
+}
+
 type SendStatus = "pending" | "sending" | "sent" | "failed" | "opened";
 
 interface WACustomer {
@@ -57,11 +61,12 @@ function WhatsAppBlastModal({
   bookings: ReturnType<typeof useApp>["bookings"];
   onComplete: (sentCount: number, recipientIds: number[], message: string) => void;
 }) {
-  const targetCustomers = resolveAudience(campaign.audience, customers, bookings);
+  const targetCustomers = resolveWhatsAppAudience(campaign.audience, customers, bookings);
   const [currentMessage, setCurrentMessage] = useState(
     initialMessage || `Hi {name}! ✨ Special offer at Glam Studio: We have an exclusive discount for you. Book now to claim it!`
   );
   const [isEditing, setIsEditing] = useState(false);
+  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [sendList, setSendList] = useState<WACustomer[]>(
     targetCustomers.map(c => ({ id: c.id, name: c.name, phone: c.phone, avatar: c.avatar, status: "pending" }))
   );
@@ -185,6 +190,36 @@ function WhatsAppBlastModal({
     const latestBridgeStatus = await getBridgeStatus(true);
     setBridgeStatus(latestBridgeStatus);
 
+    if (!consentConfirmed) {
+      setPopupData({
+        isOpen: true,
+        title: "WhatsApp consent required",
+        message: "Confirm that every selected customer has explicitly opted in to receive WhatsApp messages from this business.",
+        type: "warning"
+      });
+      return;
+    }
+
+    if (totalCount === 0) {
+      setPopupData({
+        isOpen: true,
+        title: "No eligible recipients",
+        message: "No selected customer has an explicit WhatsApp opt-in. Open a customer profile and record consent first.",
+        type: "warning"
+      });
+      return;
+    }
+
+    if (!(latestBridgeStatus.online && latestBridgeStatus.isReady)) {
+      setPopupData({
+        isOpen: true,
+        title: "WhatsApp Bridge is offline",
+        message: "Simulation is disabled in production mode. Start the local bridge with 'npm run wa-bridge' and connect WhatsApp before sending.",
+        type: "error"
+      });
+      return;
+    }
+
     setIsBlasting(true);
     setBlastDone(false);
     completionRecorded.current = false;
@@ -196,7 +231,8 @@ function WhatsAppBlastModal({
         sendList.map(c => ({ id: c.id, name: c.name, phone: c.phone })),
         currentMessage,
         campaign.name,
-        delaySeconds * 1000
+        5000,
+        true
       );
 
       if (!res.success) {
@@ -241,35 +277,9 @@ function WhatsAppBlastModal({
           }
         }
       }, 1000);
-    } else {
-      // Simulator mode when bridge process is offline
-      let index = 0;
-      const sentIds: number[] = [];
-
-      blastIntervalRef.current = setInterval(() => {
-        if (index >= sendList.length) {
-          if (blastIntervalRef.current) clearInterval(blastIntervalRef.current);
-          setIsBlasting(false);
-          if (!completionRecorded.current) {
-            completionRecorded.current = true;
-            onComplete(sentIds.length, sentIds, currentMessage);
-          }
-          setBlastDone(true);
-          setCurrentSendingName("");
-          return;
-        }
-
-        const currentTarget = sendList[index];
-        setCurrentSendingName(currentTarget.name);
-        setSendList(prev =>
-          prev.map((c, i) => (i === index ? { ...c, status: "sent" } : c))
-        );
-        sentIds.push(currentTarget.id);
-        index++;
-        setSentCount(index);
-      }, Math.max(400, delaySeconds * 300));
     }
-  };
+
+ };
 
   const handleCancelBlast = async () => {
     if (blastIntervalRef.current) {
@@ -308,7 +318,7 @@ function WhatsAppBlastModal({
   const statusIcon = (s: SendStatus) => {
     if (s === "pending") return <span style={{ fontSize: 12, color: "#94A3B8" }}>⏳ Pending</span>;
     if (s === "sending") return <span style={{ fontSize: 12, color: "#0D9488", fontWeight: 700 }}>⚡ Sending...</span>;
-    if (s === "sent") return <span style={{ fontSize: 12, color: "#16A34A", fontWeight: 700 }}>✓✓ Sent</span>;
+    if (s === "sent") return <span style={{ fontSize: 12, color: "#16A34A", fontWeight: 700 }}>✓ Submitted</span>;
     if (s === "failed") return <span style={{ fontSize: 12, color: "#DC2626", fontWeight: 700 }}>✕ Failed</span>;
     if (s === "opened") return <span style={{ fontSize: 12, color: "#0284C7", fontWeight: 700 }}>✓✓ Read</span>;
     return null;
@@ -348,7 +358,7 @@ function WhatsAppBlastModal({
                     </span>
                   ) : (
                     <span style={{ fontSize: 11, background: "#F1F5F9", color: "#64748B", padding: "2px 8px", borderRadius: 20, fontWeight: 600 }}>
-                      ● Simulator Mode
+                      ● Bridge Offline
                     </span>
                   )}
                 </div>
@@ -391,7 +401,7 @@ function WhatsAppBlastModal({
                       ? "Zero keypresses needed. Messages are dispatched directly via your session."
                       : bridgeStatus.hasQr
                       ? "Click 'Connect to WhatsApp' below to view and scan the QR code."
-                      : "Start bridge via 'npm run wa-bridge' for zero-key automation, or use instant simulation."}
+                      : "Start the local bridge with 'npm run wa-bridge', then scan the pairing QR. Simulation is disabled for real campaigns."}
                   </div>
                 </div>
               </div>
