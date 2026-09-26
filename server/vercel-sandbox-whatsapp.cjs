@@ -1,7 +1,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
-const SANDBOX_NAME = String(process.env.VERCEL_SANDBOX_NAME || "rebook-whatsapp-worker");
+const SANDBOX_NAME_PREFIX = String(process.env.VERCEL_SANDBOX_NAME || "rebook-whatsapp");
 const SANDBOX_PROJECT_ID = String(process.env.VERCEL_SANDBOX_PROJECT_ID || process.env.VERCEL_PROJECT_ID || "prj_DSQLRKITHzL5lBtWruqVZsaGv8D8");
 const SANDBOX_TEAM_ID = String(process.env.VERCEL_TEAM_ID || "team_xPBNSOeh17ykTgTj0wCrtc78");
 const SANDBOX_TIMEOUT_MS = Number(process.env.VERCEL_SANDBOX_TIMEOUT_MS || 45 * 60 * 1000);
@@ -12,7 +12,7 @@ const WORKER_PORT = 5001;
 const WORKER_VERSION = "2026-09-26-sandbox-v2";
 
 let sdkPromise;
-let sandboxPromise;
+const sandboxPromises = new Map();
 
 async function getSandboxSdk() {
   if (!sdkPromise) sdkPromise = import("@vercel/sandbox");
@@ -116,11 +116,19 @@ async function startWorker(sandbox, dependenciesReady) {
   throw new Error("Vercel Sandbox WhatsApp worker is still starting. Refresh and retry in a few seconds.");
 }
 
-async function createOrResumeSandbox() {
+function safeSandboxName(shopId) {
+  const id = String(shopId || "").trim();
+  if (!/^[A-Za-z0-9_-]{3,120}$/.test(id)) {
+    throw new Error("Invalid WhatsApp Sandbox shopId.");
+  }
+  return (SANDBOX_NAME_PREFIX + "-" + id).slice(0, 250);
+}
+
+async function createOrResumeSandbox(shopId) {
   const sdk = await getSandboxSdk();
   const auth = sandboxAuthOptions();
   const options = {
-    name: SANDBOX_NAME,
+    name: safeSandboxName(shopId),
     projectId: SANDBOX_PROJECT_ID,
     teamId: SANDBOX_TEAM_ID,
     persistent: true,
@@ -149,19 +157,36 @@ async function createOrResumeSandbox() {
   });
 }
 
-async function getWhatsAppSandbox() {
-  if (!sandboxPromise) {
-    sandboxPromise = createOrResumeSandbox().catch((error) => {
-      sandboxPromise = null;
+async function getWhatsAppSandbox(shopId) {
+  const key = String(shopId || "").trim();
+  if (!sandboxPromises.has(key)) {
+    const promise = createOrResumeSandbox(key).catch((error) => {
+      sandboxPromises.delete(key);
       throw error;
     });
+    sandboxPromises.set(key, promise);
   }
-  return sandboxPromise;
+  return sandboxPromises.get(key);
 }
 
-async function getWorkerBaseUrl() {
-  const sandbox = await getWhatsAppSandbox();
-  return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
+function extractShopId(pathname, options = {}) {
+  try {
+    if (options.body) {
+      const body = typeof options.body === "string" ? JSON.parse(options.body) : options.body;
+      if (body?.shopId) return String(body.shopId);
+    }
+  } catch {}
+  try {
+    const parsed = new URL("https://sandbox.local" + pathname);
+    const shopId = parsed.searchParams.get("shopId");
+    if (shopId) return shopId;
+  } catch {}
+  throw new Error("WhatsApp Sandbox shopId is required.");
+}
+
+async function getWorkerBaseUrl(shopId) {
+  const sandbox = await getWhatsAppSandbox(shopId);
+  return String(sandbox.domain(WORKER_PORT)).replace(//$/, "");
 }
 
 async function sandboxWorkerFetch(pathname, options = {}) {
@@ -169,7 +194,8 @@ async function sandboxWorkerFetch(pathname, options = {}) {
   const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_SANDBOX_REQUEST_TIMEOUT_MS || 15000));
 
   try {
-    const baseUrl = await getWorkerBaseUrl();
+    const shopId = extractShopId(pathname, options);
+    const baseUrl = await getWorkerBaseUrl(shopId);
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", "Bearer " + String(process.env.WHATSAPP_BRIDGE_SECRET || ""));
     headers.set("Content-Type", "application/json");
