@@ -91,6 +91,9 @@ export default function Dashboard({
   const totalCustomers = customers.length;
   const inactiveCustomers = customers.filter((c) => c.status === "inactive").length;
   const wonBack = customers.filter((c) => c.status === "won_back").length;
+  const totalBookingRevenue = bookings
+    .filter((b) => b.status !== "cancelled")
+    .reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
   const repeatCustomers = customers.filter((c) => isRepeatCustomer(c, bookings)).length;
   const repeatRate = totalCustomers > 0
     ? Math.round((repeatCustomers / totalCustomers) * 100)
@@ -224,15 +227,14 @@ export default function Dashboard({
           color="#0D9488"
           onClick={() => onNavigate("customers")}
         />
-        <StatCard
-          label="Inactive Customers"
-          value={inactiveCustomers}
-          sub="Need attention"
-          icon="⏰"
-          color="#F59E0B"
-          onClick={() => onNavigate("customers")}
-        />
         <StatCard label="Won Back" value={wonBack} sub="Last 90 days" icon="🎯" color="#10B981" />
+        <StatCard
+          label="Total Revenue"
+          value={`₹${totalBookingRevenue.toLocaleString()}`}
+          sub="All bookings"
+          icon="💵"
+          color="#0D9488"
+        />
         <StatCard
           label="Revenue Recovered"
           value={`₹${totalRecoveredRevenue.toLocaleString()}`}
