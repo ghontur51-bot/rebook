@@ -111,6 +111,7 @@ function getSession(shopId) {
       activeBlast: freshBlast(),
       pendingBlasts: [],
       initializationPromise: null,
+      initializationGeneration: 0,
     });
   }
   return sessions.get(id);
@@ -148,6 +149,19 @@ function cleanupLegacySessionFolders() {
         console.log(`Removed orphaned WhatsApp session folder: ${name}`);
       } catch (error) {
         console.warn(`Unable to remove orphaned WhatsApp session folder: ${name}`, error.message);
+      }
+    }
+  }
+}
+
+function cleanupChromiumSingletonLocks(userDataDir) {
+  const lockNames = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+  for (const lockName of lockNames) {
+    try {
+      fs.rmSync(path.join(userDataDir, lockName), { force: true });
+    } catch (error) {
+      if (error && error.code !== "ENOENT") {
+        console.warn(`Unable to remove Chromium ${lockName}: ${error.message}`);
       }
     }
   }
@@ -206,11 +220,21 @@ async function initializeSession(shopId) {
   s.connectionState = "STARTING";
   s.initializationError = null;
   s.initializationStartedAt = new Date().toISOString();
+  const initializationGeneration = s.initializationGeneration + 1;
+  s.initializationGeneration = initializationGeneration;
+  const isCurrentInitialization = () =>
+    sessions.get(shopId) === s && s.initializationGeneration === initializationGeneration;
 
   s.initializationPromise = (async () => {
+    const sessionUserDataDir = path.join(SESSION_DIR, `session-${shopId}`);
+    cleanupChromiumSingletonLocks(sessionUserDataDir);
+
     const executablePath = await initializeBrowserPreflight();
+    if (!isCurrentInitialization()) return;
+
     const { Client, LocalAuth } = require("whatsapp-web.js");
 
+    cleanupChromiumSingletonLocks(sessionUserDataDir);
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: shopId, dataPath: SESSION_DIR }),
       puppeteer: {
@@ -234,16 +258,23 @@ async function initializeSession(shopId) {
       },
     });
 
+    if (!isCurrentInitialization()) {
+      try { await client.destroy(); } catch {}
+      return;
+    }
+
     s.client = client;
     s.connectionState = "BROWSER_STARTED";
 
     client.on("loading_screen", (percent, message) => {
+      if (!isCurrentInitialization()) return;
       s.connectionState = "LOADING";
       s.initializationError = message ? String(message) : null;
       s.loadingPercent = Number(percent) || 0;
     });
 
     client.on("qr", async (qr) => {
+      if (!isCurrentInitialization()) return;
       s.isReady = false;
       s.connectionState = "PAIRING";
       s.loadingPercent = 0;
@@ -257,11 +288,13 @@ async function initializeSession(shopId) {
     });
 
     client.on("authenticated", () => {
+      if (!isCurrentInitialization()) return;
       s.connectionState = "AUTHENTICATED";
       s.initializationError = null;
     });
 
     client.on("ready", () => {
+      if (!isCurrentInitialization()) return;
       s.isReady = true;
       s.connectionState = "CONNECTED";
       s.qrDataUrl = null;
@@ -275,11 +308,13 @@ async function initializeSession(shopId) {
     });
 
     client.on("change_state", (nextState) => {
+      if (!isCurrentInitialization()) return;
       s.connectionState = String(nextState);
       if (nextState !== "CONNECTED") s.isReady = false;
     });
 
     client.on("auth_failure", (message) => {
+      if (!isCurrentInitialization()) return;
       s.isReady = false;
       s.connectionState = "AUTH_FAILURE";
       s.initializationError = "WhatsApp authentication failed. Reset the session and scan a new QR code.";
@@ -287,6 +322,7 @@ async function initializeSession(shopId) {
     });
 
     client.on("message", (message) => {
+      if (!isCurrentInitialization()) return;
       try {
         if (!message?.from || message.fromMe || !message.body) return;
         const normalized = String(message.body).trim().toLowerCase().replace(/\s+/g, " ");
@@ -301,12 +337,12 @@ async function initializeSession(shopId) {
     });
 
     client.on("disconnected", (reason) => {
+      if (!isCurrentInitialization()) return;
       s.isReady = false;
       s.connectionState = "DISCONNECTED";
       s.clientInfo = null;
       s.qrDataUrl = null;
       s.client = null;
-      s.initializationPromise = null;
       s.initializationStartedAt = null;
       console.warn(`WhatsApp disconnected: ${shopId}`, reason);
     });
@@ -320,6 +356,7 @@ async function initializeSession(shopId) {
 
     await initializeWithTimeout;
   })().catch(async (error) => {
+    if (!isCurrentInitialization()) return;
     s.isReady = false;
     s.connectionState = "ERROR";
     s.initializationError = error.message || "Unable to initialize WhatsApp.";
@@ -332,7 +369,9 @@ async function initializeSession(shopId) {
       s.client = null;
     }
   }).finally(() => {
-    s.initializationPromise = null;
+    if (isCurrentInitialization()) {
+      s.initializationPromise = null;
+    }
     launchingSessionCount = Math.max(0, launchingSessionCount - 1);
   });
 
@@ -342,7 +381,11 @@ async function initializeSession(shopId) {
 
 async function getSessionReady(shopId) {
   const s = getSession(shopId);
-  if (!s.client && !s.initializationPromise) await initializeSession(shopId);
+  if (!s.client && !s.initializationPromise) {
+    // WhatsApp Web startup is deliberately asynchronous. /connect and /status
+    // must return the current state immediately; /api/status is the source of truth.
+    void initializeSession(shopId);
+  }
   return s;
 }
 
@@ -432,6 +475,8 @@ function publicState(s) {
     clientInfo: s.clientInfo,
     connectionState: s.connectionState,
     initializationError: s.initializationError,
+    initializationStartedAt: s.initializationStartedAt,
+    loadingPercent: Number(s.loadingPercent || 0),
     suppressionCount: s.suppressedNumbers.size,
     activeBlast: {
       isRunning: s.activeBlast.isRunning,
@@ -675,6 +720,7 @@ app.post("/api/reset", async (req, res) => {
   try {
     const shopId = safeShopId(req.body?.shopId);
     const s = getSession(shopId);
+    s.initializationGeneration += 1;
     s.activeBlast.cancelled = true;
     await cancelPendingBlasts(s, "WhatsApp session was reset before this queued batch started.");
 
@@ -697,6 +743,7 @@ app.post("/api/disconnect", async (req, res) => {
   try {
     const shopId = safeShopId(req.body?.shopId);
     const s = getSession(shopId);
+    s.initializationGeneration += 1;
     s.activeBlast.cancelled = true;
     await cancelPendingBlasts(s, "WhatsApp session disconnected before this queued batch started.");
 
@@ -741,6 +788,15 @@ async function bootExistingSessions() {
 
 app.listen(PORT, async () => {
   ensureDirs();
+  try {
+    fs.writeFileSync(
+      path.join(DATA_DIR, ".worker-runtime-version"),
+      String(process.env.REBOOK_WORKER_VERSION || "unknown") + "\n",
+      "utf8",
+    );
+  } catch (error) {
+    console.warn("Unable to write WhatsApp worker runtime version:", error.message);
+  }
   console.log(`ReBook WhatsApp worker listening on port ${PORT}`);
   console.log(`Max concurrent WhatsApp sessions: ${MAX_SESSIONS}`);
   await bootExistingSessions();
