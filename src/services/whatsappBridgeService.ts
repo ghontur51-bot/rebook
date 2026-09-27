@@ -168,7 +168,25 @@ export async function startBridgeBlast(recipients: BlastRecipient[], message: st
 }
 
 export async function getBlastProgress(): Promise<BlastProgressResponse | null> {
-  try { return await bridgeRequest<BlastProgressResponse>('/blast/progress', { method: 'GET', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) }); } catch { return null; }
+  try {
+    const cacheBust = Date.now();
+    const progress = await bridgeRequest<BlastProgressResponse>(
+      `/blast/progress?ts=${cacheBust}`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    return typeof progress?.isRunning === 'boolean' ? progress : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function cancelBridgeBlast(): Promise<boolean> {
