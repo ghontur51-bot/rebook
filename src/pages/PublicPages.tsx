@@ -165,8 +165,10 @@ export function About() {
       <Section title="Who it is for"><p>ReBook is designed for salons and similar appointment-based beauty businesses that need customer records, scheduling, staff coordination and retention workflows in a single operational system.</p></Section>
       <Section title="Business information">
         <p><strong>Legal business name:</strong> {siteConfig.legalBusinessName}</p>
-        <p><strong>Address:</strong> {siteConfig.businessAddress || "Not configured"}</p>
-        <p><strong>Support:</strong> {siteConfig.supportEmail || "Not configured"}</p>
+        <p><strong>Business type:</strong> {siteConfig.businessType}</p>
+        <p><strong>Business address:</strong> {siteConfig.businessAddress}</p>
+        <p><strong>Support email:</strong> {siteConfig.supportEmail}</p>
+        <p><strong>Support phone:</strong> {siteConfig.supportPhone}</p>
       </Section>
     </Layout>
   );
@@ -175,14 +177,21 @@ export function About() {
 export function Contact() {
   return (
     <Layout title="Contact ReBook">
-      <p style={{ color: "#475569", lineHeight: 1.8 }}>Need help with setup, subscription, billing or your ReBook account? Use the support details configured for the ReBook service.</p>
+      <p style={{ color: "#475569", lineHeight: 1.8 }}>
+        Need help with setup, subscription, billing or your ReBook account? Contact ReBook using the details below.
+      </p>
+
       <div style={{ marginTop: 26, display: "grid", gap: 12 }}>
-        <Info label="Support email" value={siteConfig.supportEmail || "Not configured"} href={siteConfig.supportEmail ? "mailto:" + siteConfig.supportEmail : undefined} />
-        <Info label="Support phone" value={siteConfig.supportPhone || "Not configured"} />
-        <Info label="Business address" value={siteConfig.businessAddress || "Not configured"} />
+        <Info label="Legal business name" value={siteConfig.legalBusinessName} />
+        <Info label="Business type" value={siteConfig.businessType} />
+        <Info label="Support email" value={siteConfig.supportEmail} href={"mailto:" + siteConfig.supportEmail} />
+        <Info label="Support phone" value={siteConfig.supportPhone} />
+        <Info label="Business address" value={siteConfig.businessAddress} />
+        <Info label="Support availability" value="Business days only" />
       </div>
+
       <div style={{ marginTop: 26, padding: 18, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, color: "#64748b", fontSize: 13, lineHeight: 1.7 }}>
-        Configure the real legal business name, support contact and business address before submitting the website for payment-gateway verification.
+        For billing or refund requests, please contact ReBook using the support email or either support phone number and include your ReBook account/shop details and payment transaction information where applicable.
       </div>
     </Layout>
   );
@@ -242,11 +251,49 @@ export function Privacy() {
 export function RefundPolicy() {
   return (
     <Layout title="Refund & Cancellation Policy">
-      <p><strong>Effective date:</strong> September 25, 2026</p>
-      <Section title="Subscription cancellation"><p>A subscription can be allowed to lapse without renewal. Cancelling a future renewal does not automatically cancel or refund an already-paid active subscription term.</p></Section>
-      <Section title="Refunds"><p>Refund requests are reviewed for duplicate or erroneous charges, failed activation, or situations where ReBook could not reasonably provide the purchased service. Requests should be made as soon as possible using the Contact page and should include transaction details.</p></Section>
-      <Section title="Non-use"><p>Unused time during an otherwise successfully activated subscription is not automatically refundable unless ReBook agrees otherwise or applicable law requires it.</p></Section>
-      <Section title="Payment disputes"><p>Where a payment dispute, chargeback or reversal is raised, ReBook may temporarily restrict access while the transaction is investigated.</p></Section>
+      <p><strong>Effective date:</strong> September 27, 2026</p>
+
+      <Section title="Subscription cancellation">
+        <p>
+          Customers may cancel a future subscription renewal before the next billing cycle. Cancelling a future renewal does not terminate an already-paid active subscription term, and the active term remains available until its scheduled end date.
+        </p>
+      </Section>
+
+      <Section title="Refund eligibility">
+        <p>
+          ReBook does not provide refunds or cancellations for an already-paid active subscription term. The standard refund case covered by this policy is a duplicate payment for the same subscription or billing cycle.
+        </p>
+      </Section>
+
+      <Section title="Duplicate payment requests">
+        <p>
+          A duplicate-payment refund request should be submitted within 7 days of the duplicate charge. Please provide the ReBook account or shop details, payment date, amount and transaction/reference information so the charge can be verified.
+        </p>
+      </Section>
+
+      <Section title="Refund processing time">
+        <p>
+          Once a duplicate payment is verified and a refund is approved, ReBook expects the refund to be processed within 7–10 business days. The time taken for the refunded amount to appear in the customer's account may also depend on the payment provider or bank.
+        </p>
+      </Section>
+
+      <Section title="How to request a refund or cancellation">
+        <p>
+          Contact ReBook through <a href={"mailto:" + siteConfig.supportEmail} style={{ color: "#0f766e" }}>{siteConfig.supportEmail}</a> or either support phone number listed on the Contact page. Refund requests should include the relevant transaction details.
+        </p>
+      </Section>
+
+      <Section title="Non-refundable active subscriptions">
+        <p>
+          After a subscription has been purchased and activated, the active subscription cannot be cancelled for a refund. Unused time during an active paid term is not refundable.
+        </p>
+      </Section>
+
+      <Section title="Policy application">
+        <p>
+          This policy applies subject to applicable law and the payment-provider terms that govern the transaction.
+        </p>
+      </Section>
     </Layout>
   );
 }
