@@ -71,7 +71,6 @@ function WhatsAppBlastModal({
     initialMessage || `Hi {name}! ✨ Special offer at Glam Studio: We have an exclusive discount for you. Book now to claim it!`
   );
   const [isEditing, setIsEditing] = useState(false);
-  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [sendList, setSendList] = useState<WACustomer[]>(
     targetCustomers.map(c => ({ id: c.id, name: c.name, phone: c.phone, avatar: c.avatar, status: "pending" }))
   );
@@ -234,16 +233,6 @@ function WhatsAppBlastModal({
     const latestBridgeStatus = await getBridgeStatus(true);
     setBridgeStatus(latestBridgeStatus);
 
-    if (!consentConfirmed) {
-      setPopupData({
-        isOpen: true,
-        title: "WhatsApp consent required",
-        message: "Confirm that every selected customer has explicitly opted in to receive WhatsApp messages from this business.",
-        type: "warning"
-      });
-      return;
-    }
-
     if (totalCount === 0) {
       setPopupData({
         isOpen: true,
@@ -275,8 +264,7 @@ function WhatsAppBlastModal({
         sendList.map(c => ({ id: c.id, name: c.name, phone: c.phone })),
         currentMessage,
         campaign.name,
-        5000,
-        true
+        5000
       );
 
       if (!res.success) {
@@ -757,19 +745,6 @@ Submitted {totalCount} messages to the local WhatsApp session. WhatsApp delivery
                 </div>
               ) : (
                 <div>
-                  <div style={{ marginBottom: 14, padding: "12px 14px", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 10 }}>
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#334155", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={consentConfirmed}
-                      onChange={(e) => setConsentConfirmed(e.target.checked)}
-                      disabled={totalCount === 0 || isBlasting}
-                      style={{ marginTop: 2 }}
-                    />
-                    <span><strong>Consent confirmed:</strong> every recipient in this queue has explicitly opted in to receive WhatsApp messages from this business.</span>
-                  </label>
-                </div>
-
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                     <div style={{ fontSize: 13, color: "var(--muted-foreground)", textAlign: "left" }}>
                       Target: <strong>{totalCount} customers</strong> ({campaign.audience})
