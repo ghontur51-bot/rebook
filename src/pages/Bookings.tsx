@@ -171,7 +171,7 @@ export default function Bookings() {
     }
   };
 
-  const dates = [...new Set(bookings.map(b => b.date))].sort();
+  const dates = [...new Set(bookings.map(b => b.date))].sort((a, b) => b.localeCompare(a));
   const filtered = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
 
 
@@ -237,7 +237,15 @@ export default function Bookings() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {dayBookings.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time)).map(booking => (
+              {dayBookings
+                .sort((a, b) => {
+                  const timeDiff = timeToMinutes(b.time) - timeToMinutes(a.time);
+                  if (Number.isFinite(timeDiff) && timeDiff !== 0) return timeDiff;
+                  const createdDiff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+                  if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff;
+                  return Number(b.id) - Number(a.id);
+                })
+                .map(booking => (
                 <div key={booking.id} style={{ background: "#fff", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
                   <div style={{ flexShrink: 0, textAlign: "center", width: 56 }}>
                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 15, color: "var(--primary)" }}>{formatTime(booking.time)}</div>
