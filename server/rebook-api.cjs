@@ -690,12 +690,28 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     const triggerLower = String(auto.trigger || '').toLowerCase();
 
     if (triggerLower.includes('5,000')) {
-      // Keep the existing event-driven ₹5,000+ behavior, but also recover any
-      // qualifying booking that has not yet produced a successful automation run.
-      const qualifyingBookings = bookings.filter((booking) =>
-        (booking.status === 'confirmed' || booking.status === 'completed') &&
-        Number(booking.amount) >= 5000
-      );
+      // Keep the existing event-driven ₹5,000+ behavior, but let the daily
+      // scheduler pick up only newly qualifying bookings since the previous run.
+      // This prevents a first scheduler run from replaying the entire booking history.
+      const previousRunTime = schedule.lastRunAt
+        ? new Date(schedule.lastRunAt).getTime()
+        : Date.now() - 24 * 60 * 60 * 1000;
+      const qualifyingBookings = bookings.filter((booking) => {
+        if (booking.status !== 'confirmed' && booking.status !== 'completed') return false;
+        if (Number(booking.amount) < 5000) return false;
+
+        const eventTimestamp = booking.confirmedAt || booking.createdAt;
+        const eventTime = eventTimestamp ? new Date(eventTimestamp).getTime() : NaN;
+        if (Number.isFinite(eventTime)) return eventTime > previousRunTime;
+
+        // Legacy/imported bookings may only have a calendar date.
+        const bookingDate = String(booking.date || '').slice(0, 10);
+        const todayKey = dayKey;
+        const yesterdayDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const yesterdayParts = getLocalDateParts(yesterdayDate, schedule.timezone);
+        const yesterdayKey = dateKeyFromParts(yesterdayParts);
+        return bookingDate === todayKey || bookingDate === yesterdayKey;
+      });
 
       for (const booking of qualifyingBookings) {
         const customer =
