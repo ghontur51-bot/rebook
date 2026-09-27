@@ -161,11 +161,16 @@ async function isWorkerHealthy(sandbox) {
 async function restartStaleWorkerIfNeeded(sandbox) {
   const versionCheck = await sandbox.runCommand({
     cmd: "sh",
-    args: ["-lc", `test "$(cat "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" 2>/dev/null)" = "${WORKER_VERSION}"`],
+    args: [
+      "-lc",
+      `if [ ! -f "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" ]; then exit 1; fi; test "$(cat "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" 2>/dev/null)" != "${WORKER_VERSION}"`,
+    ],
     cwd: WORKER_DIR,
   });
 
-  if (versionCheck.exitCode === 0) return;
+  // No marker means this sandbox has not successfully booted the worker yet.
+  // Only kill a process when an existing runtime marker proves it is stale.
+  if (versionCheck.exitCode !== 0) return;
 
   await sandbox.runCommand({
     cmd: "sh",
