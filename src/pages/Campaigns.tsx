@@ -745,17 +745,6 @@ Submitted {totalCount} messages to the local WhatsApp session. WhatsApp delivery
                 </div>
               ) : (
                 <div>
-                  <div style={{ marginBottom: 14, padding: "12px 14px", background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 10 }}>
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#334155", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                                      disabled={totalCount === 0 || isBlasting}
-                      style={{ marginTop: 2 }}
-                    />
-                    
-                  </label>
-                </div>
-
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                     <div style={{ fontSize: 13, color: "var(--muted-foreground)", textAlign: "left" }}>
                       Target: <strong>{totalCount} customers</strong> ({campaign.audience})
