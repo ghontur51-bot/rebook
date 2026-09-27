@@ -49,6 +49,29 @@ export function clearDemoWhatsAppPin() {
   sessionStorage.removeItem('rebook_demo_whatsapp_pin');
 }
 
+function normalizeBridgeError(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value instanceof Error && value.message) return value.message;
+
+  if (value && typeof value === 'object') {
+    const candidate = value as Record<string, unknown>;
+    for (const key of ['message', 'error', 'detail', 'reason']) {
+      const nested = candidate[key];
+      if (typeof nested === 'string' && nested.trim()) return nested;
+    }
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // fall through to the safe fallback
+    }
+  }
+
+  const coerced = String(value ?? '').trim();
+  if (coerced && coerced !== '[object Object]') return coerced;
+  return fallback;
+}
+
 export async function verifyDemoWhatsAppPin(pin: string): Promise<{ success: boolean; error?: string }> {
   const candidate = String(pin || '').trim();
   if (!candidate) return { success: false, error: 'Enter the demo WhatsApp PIN first.' };
@@ -59,8 +82,8 @@ export async function verifyDemoWhatsAppPin(pin: string): Promise<{ success: boo
       signal: AbortSignal.timeout(8000),
     }, candidate);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error?.message || 'Unable to verify the demo WhatsApp PIN.' };
+  } catch (error: unknown) {
+    return { success: false, error: normalizeBridgeError(error, 'Unable to verify the demo WhatsApp PIN.') };
   }
 }
 
@@ -84,7 +107,14 @@ async function bridgeRequest<T>(suffix: string, init: RequestInit = {}, demoPinO
 
   const response = await fetch(url, { ...init, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || ('WhatsApp worker request failed (' + response.status + ').'));
+  if (!response.ok) {
+    throw new Error(
+      normalizeBridgeError(
+        (data as Record<string, unknown>)?.error,
+        'WhatsApp worker request failed (' + response.status + ').',
+      ),
+    );
+  }
   return data as T;
 }
 
