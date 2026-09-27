@@ -95,10 +95,14 @@ trap 'rm -f "${BOOTSTRAP_LOCK}"' EXIT
 
 if [ ! -f "${BOOTSTRAP_DONE}" ]; then
   if ! (ldconfig -p 2>/dev/null | grep -q 'libnss3.so' && ldconfig -p 2>/dev/null | grep -q 'libatk-1.0.so' && ldconfig -p 2>/dev/null | grep -q 'libgtk-3.so'); then
-    dnf install -y --setopt=install_weak_deps=False \\
-      ca-certificates nss atk at-spi2-atk gtk3 cups-libs \\
-      libXcomposite libXdamage libXrandr libXScrnSaver libXi libXtst \\
-      pango alsa-lib libdrm mesa-libgbm libxkbcommon fontconfig freetype harfbuzz cairo dbus-libs \\
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+    apt-get install -y --no-install-recommends \\
+      ca-certificates fonts-liberation libasound2t64 libatk-bridge2.0-0 libatk1.0-0 \\
+      libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libgbm1 \\
+      libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \\
+      libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \\
+      libxi6 libxkbcommon0 libxrandr2 libxrender1 libxss1 libxtst6 \\
       >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
   fi
 
@@ -261,7 +265,11 @@ async function sandboxWorkerFetch(pathname, options = {}) {
     }
 
     if (!response.ok) {
-      const error = new Error(body.error || ("WhatsApp Sandbox worker request failed (" + response.status + ")."));
+      let reason = body.error;
+      if (reason && typeof reason !== "string") {
+        try { reason = JSON.stringify(reason); } catch { reason = String(reason); }
+      }
+      const error = new Error(reason || ("WhatsApp Sandbox worker request failed (" + response.status + ")."));
       error.status = response.status >= 500 ? 503 : response.status;
       throw error;
     }
