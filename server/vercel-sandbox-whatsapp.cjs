@@ -146,7 +146,7 @@ async function isWorkerHealthy(sandbox) {
     cmd: "node",
     args: [
       "-e",
-      `fetch('http://127.0.0.1:${WORKER_PORT}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))`,
+      `fetch('http://127.0.0.1:${WORKER_PORT}/api/health', { signal: AbortSignal.timeout(3000) }).then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))`,
     ],
     cwd: WORKER_DIR,
     env: workerEnv(),
@@ -159,31 +159,63 @@ async function isWorkerHealthy(sandbox) {
 // already running in the background (lock file present) it's also a fast no-op; only a
 // genuinely idle sandbox launches a new detached bootstrap run.
 async function restartStaleWorkerIfNeeded(sandbox) {
+  const healthy = await isWorkerHealthy(sandbox);
+
+  if (!healthy) {
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale lock and relaunching`);
+    await sandbox.runCommand({
+      cmd: "sh",
+      args: [
+        "-lc",
+        `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
+      ],
+      cwd: WORKER_DIR,
+    });
+    return;
+  }
+
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, checking runtime version`);
+
   const versionCheck = await sandbox.runCommand({
     cmd: "sh",
     args: [
       "-lc",
-      `if [ ! -f "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" ]; then exit 1; fi; test "$(cat "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" 2>/dev/null)" != "${WORKER_VERSION}"`,
+      `test -f "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" && test "$(cat "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" 2>/dev/null)" != "${WORKER_VERSION}"`,
     ],
     cwd: WORKER_DIR,
   });
 
-  // No marker means this sandbox has not successfully booted the worker yet.
-  // Only kill a process when an existing runtime marker proves it is stale.
-  if (versionCheck.exitCode !== 0) return;
+  if (versionCheck.exitCode === 0) {
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: version marker stale, restarting`);
+    await sandbox.runCommand({
+      cmd: "sh",
+      args: [
+        "-lc",
+        `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
+      ],
+      cwd: WORKER_DIR,
+    });
+    return;
+  }
 
-  await sandbox.runCommand({
-    cmd: "sh",
-    args: ["-lc", `for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`],
-    cwd: WORKER_DIR,
-  });
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, version current, skipping relaunch`);
 }
 
 async function launchBootstrapIfNeeded(sandbox) {
-  if (await isWorkerHealthy(sandbox)) return;
+  if (await isWorkerHealthy(sandbox)) {
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, skipping relaunch`);
+    return;
+  }
 
-  const lockPresent = await sandbox.runCommand({ cmd: "test", args: ["-f", BOOTSTRAP_LOCK], cwd: WORKER_DIR });
-  if (lockPresent.exitCode === 0) return;
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale lock and relaunching`);
+  await sandbox.runCommand({
+    cmd: "sh",
+    args: [
+      "-lc",
+      `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
+    ],
+    cwd: WORKER_DIR,
+  });
 
   await sandbox.runCommand({
     cmd: "sh",
@@ -193,6 +225,7 @@ async function launchBootstrapIfNeeded(sandbox) {
     sudo: true,
     detached: true,
   });
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap launched after failed health probe`);
 }
 
 function safeSandboxName(shopId) {
