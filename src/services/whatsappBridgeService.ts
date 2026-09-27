@@ -132,8 +132,8 @@ export async function connectBridgeSession(): Promise<{ success: boolean; error?
   }
 }
 
-export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {
-  try { await bridgeRequest('/blast', { method: 'POST', body: JSON.stringify({ recipients, message, campaignName, delayMs, consentConfirmed }) }); return { success: true }; }
+export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/blast', { method: 'POST', body: JSON.stringify({ recipients, message, campaignName, delayMs }) }); return { success: true }; }
   catch (error: any) { return { success: false, error: error?.message || 'Unable to start WhatsApp campaign.' }; }
 }
 
@@ -145,8 +145,8 @@ export async function cancelBridgeBlast(): Promise<boolean> {
   try { await bridgeRequest('/blast/cancel', { method: 'POST', body: '{}' }); return true; } catch { return false; }
 }
 
-export async function sendSingleViaBridge(phone: string, message: string, name: string, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {
-  try { await bridgeRequest('/send-single', { method: 'POST', body: JSON.stringify({ phone, message, name, consentConfirmed }) }); return { success: true }; }
+export async function sendSingleViaBridge(phone: string, message: string, name: string): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/send-single', { method: 'POST', body: JSON.stringify({ phone, message, name }) }); return { success: true }; }
   catch (error: any) { return { success: false, error: error?.message || 'Unable to send WhatsApp message.' }; }
 }
 
