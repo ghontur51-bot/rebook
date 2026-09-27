@@ -359,6 +359,7 @@ async function shopSnapshot(shop) {
     listDocuments(serviceAccount, projectId, 'customers'),
     listDocuments(serviceAccount, projectId, 'bookings'),
     listDocuments(serviceAccount, projectId, 'automations'),
+    listDocuments(serviceAccount, projectId, 'campaigns'),
     listDocuments(serviceAccount, projectId, 'messages'),
     listDocuments(serviceAccount, projectId, 'staff'),
     listDocuments(serviceAccount, projectId, 'automationRuns'),
