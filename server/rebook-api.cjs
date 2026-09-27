@@ -786,7 +786,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
           })),
           message: batch[0]?.message || '',
           campaignName: `Scheduled Customer Automations · Batch ${batchNumber}`,
-          consentConfirmed: true,
           automation: true,
           callbackUrl,
           callbackSecret: AUTOMATION_CALLBACK_SECRET,
