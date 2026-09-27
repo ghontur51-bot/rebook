@@ -830,17 +830,17 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     lastRunDate: dayKey,
   };
 
-  if (!eligible.length) {
+  if (!eligible.length && !staffWorkMessages.length) {
     const updatedSchedule = {
       ...baseSchedule,
       lastRunStatus: 'success',
-      lastRunSummary: { eligible: 0, queued: 0, failed: 0 },
+      lastRunSummary: { eligible: 0, queued: 0, failed: 0, staffSent: 0, staffFailed: 0 },
     };
     await setShopAutomationScheduler(shop, updatedSchedule);
-    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0 };
+    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0, staffSent: 0, staffFailed: 0 };
   }
 
-  if (!AUTOMATION_CALLBACK_SECRET) {
+  if (eligible.length && !AUTOMATION_CALLBACK_SECRET) {
     const failedSchedule = {
       ...baseSchedule,
       lastRunStatus: 'failed',
@@ -868,6 +868,8 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
 
   let queued = 0;
   let failed = 0;
+  let staffSent = 0;
+  let staffFailed = 0;
   let currentRuns = [...automationRuns];
 
   for (let offset = 0; offset < eligible.length; offset += batchSize) {
@@ -942,6 +944,24 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     }
   }
 
+  for (const staffMessage of staffWorkMessages) {
+    try {
+      await whatsappBridgeFetch('/api/send-single', {
+        method: 'POST',
+        body: JSON.stringify({
+          shopId: shop.shopId,
+          phone: staffMessage.phone,
+          message: staffMessage.message,
+          name: staffMessage.name,
+        }),
+      });
+      staffSent += 1;
+    } catch (error) {
+      staffFailed += 1;
+      console.error('Scheduled staff work message failed:', shop.shopId, staffMessage.name, error.message);
+    }
+  }
+
   const summaryAutomations = automations.map((auto) => automationStatsFor(auto, currentRuns));
   await commitWrites(serviceAccount, projectId, [
     ...summaryAutomations.map((auto) =>
@@ -949,21 +969,25 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     ),
     makeUpdateWrite(projectId, 'automationScheduler', 'current', {
       ...baseSchedule,
-      lastRunStatus: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
+      lastRunStatus: failed > 0 && queued === 0 && staffFailed > 0 ? 'failed' : (failed > 0 || staffFailed > 0) ? 'partial' : 'success',
       lastRunSummary: {
         eligible: eligible.length,
         queued,
-        failed,
+        failed: failed + staffFailed,
+        staffSent,
+        staffFailed,
       },
     }),
   ]);
 
   return {
     shopId: shop.shopId,
-    status: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
+    status: failed > 0 && queued === 0 && staffFailed > 0 ? 'failed' : (failed > 0 || staffFailed > 0) ? 'partial' : 'success',
     eligible: eligible.length,
     queued,
-    failed,
+    failed: failed + staffFailed,
+    staffSent,
+    staffFailed,
     batchSize,
     batches: Math.ceil(eligible.length / batchSize),
   };
