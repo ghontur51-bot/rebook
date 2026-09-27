@@ -116,8 +116,41 @@ function getSession(shopId) {
   return sessions.get(id);
 }
 
+let launchingSessionCount = 0;
+
 function connectedSessionCount() {
   return [...sessions.values()].filter((s) => s.client && ["DISCONNECTED", "UNLAUNCHED"].indexOf(s.connectionState) === -1).length;
+}
+
+function activeSessionCount() {
+  return connectedSessionCount() + launchingSessionCount;
+}
+
+function isStableShopId(shopId) {
+  return !String(shopId || "").trim().startsWith("session-");
+}
+
+function cleanupLegacySessionFolders() {
+  ensureDirs();
+  let entries = [];
+  try {
+    entries = fs.readdirSync(SESSION_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {}
+
+  // whatsapp-web.js/LocalAuth owns the single "session-" prefix. Older broken
+  // boots passed that folder name back as shopId, producing session-session-*.
+  for (const name of entries) {
+    if (/^session-session-/.test(name)) {
+      try {
+        fs.rmSync(path.join(SESSION_DIR, name), { recursive: true, force: true });
+        console.log(`Removed orphaned WhatsApp session folder: ${name}`);
+      } catch (error) {
+        console.warn(`Unable to remove orphaned WhatsApp session folder: ${name}`, error.message);
+      }
+    }
+  }
 }
 
 function resolvePuppeteer() {
@@ -157,12 +190,19 @@ async function initializeSession(shopId) {
   const s = getSession(shopId);
   if (s.client || s.initializationPromise) return s;
 
-  if (connectedSessionCount() >= MAX_SESSIONS) {
-    s.connectionState = "CAPACITY";
-    s.initializationError = `WhatsApp worker capacity reached. Maximum connected sessions: ${MAX_SESSIONS}.`;
+  if (!isStableShopId(shopId)) {
+    s.connectionState = "ERROR";
+    s.initializationError = "Invalid WhatsApp shopId. Use the stable shop ID, not a LocalAuth session folder name.";
     return s;
   }
 
+  if (activeSessionCount() >= MAX_SESSIONS) {
+    s.connectionState = "CAPACITY";
+    s.initializationError = `WhatsApp worker capacity reached. Maximum active sessions: ${MAX_SESSIONS}.`;
+    return s;
+  }
+
+  launchingSessionCount += 1;
   s.connectionState = "STARTING";
   s.initializationError = null;
   s.initializationStartedAt = new Date().toISOString();
@@ -293,6 +333,7 @@ async function initializeSession(shopId) {
     }
   }).finally(() => {
     s.initializationPromise = null;
+    launchingSessionCount = Math.max(0, launchingSessionCount - 1);
   });
 
   return s;
@@ -679,6 +720,8 @@ app.post("/api/disconnect", async (req, res) => {
 
 async function bootExistingSessions() {
   ensureDirs();
+  cleanupLegacySessionFolders();
+
   let entries = [];
   try {
     entries = fs.readdirSync(SESSION_DIR, { withFileTypes: true })
@@ -686,7 +729,14 @@ async function bootExistingSessions() {
       .map((entry) => entry.name);
   } catch {}
 
-  for (const shopId of entries.slice(0, MAX_SESSIONS)) {
+  // LocalAuth stores shopId "demo_whatsapp_test" as folder "session-demo_whatsapp_test".
+  // Always strip exactly that storage prefix before handing the ID back to initializeSession.
+  const shopIds = entries
+    .filter((folderName) => folderName.startsWith("session-"))
+    .map((folderName) => folderName.slice("session-".length))
+    .filter((shopId) => isStableShopId(shopId) && /^[A-Za-z0-9_-]{3,120}$/.test(shopId));
+
+  for (const shopId of shopIds.slice(0, MAX_SESSIONS)) {
     try {
       await initializeSession(shopId);
     } catch (error) {
