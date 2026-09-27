@@ -1107,7 +1107,7 @@ export default function Campaigns() {
                     <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Channel</label>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                       {[
-                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Vercel Sandbox" }
+                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Vercel Sandbox" },
                         { id: "SMS", label: "SMS", icon: "💬", desc: "Reliable fallback" },
                         { id: "Email", label: "Email", icon: "✉️", desc: "Best for newsletters" },
                       ].map(ch => (
