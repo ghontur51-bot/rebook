@@ -132,8 +132,8 @@ export async function connectBridgeSession(): Promise<{ success: boolean; error?
   }
 }
 
-export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000, consentConfirmed = false): Promise<{ success: boolean; error?: string }> {
-  try { await bridgeRequest('/blast', { method: 'POST', body: JSON.stringify({ recipients, message, campaignName, delayMs, consentConfirmed }) }); return { success: true }; }
+export async function startBridgeBlast(recipients: BlastRecipient[], message: string, campaignName = 'Blast Campaign', delayMs = 5000): Promise<{ success: boolean; error?: string }> {
+  try { await bridgeRequest('/blast', { method: 'POST', body: JSON.stringify({ recipients, message, campaignName, delayMs }) }); return { success: true }; }
   catch (error: any) { return { success: false, error: error?.message || 'Unable to start WhatsApp campaign.' }; }
 }
 
