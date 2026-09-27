@@ -1070,7 +1070,7 @@ app.get('/api/admin/shops', requireAdmin, async (_req, res, next) => {
 app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
   try {
     const body = req.body || {};
-    const required = ['shopName', 'ownerName', 'ownerEmail', 'price', 'firebaseServiceAccountJson'];
+    const required = ['shopName', 'ownerName', 'price', 'firebaseServiceAccountJson'];
     for (const key of required) if (!body[key]) return res.status(400).json({ error: `${key} is required.` });
     let serviceAccount;
     try {
@@ -1079,7 +1079,8 @@ app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Firebase service account JSON is not valid JSON. Paste the original downloaded service-account JSON file contents exactly.' });
     }
     if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) return res.status(400).json({ error: 'Firebase service account JSON is missing project_id/client_email/private_key.' });
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(body.ownerEmail).trim())) return res.status(400).json({ error: 'ownerEmail must be a valid email address.' });
+    const ownerEmail = String(body.ownerEmail || '').trim();
+    if (ownerEmail && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(ownerEmail)) return res.status(400).json({ error: 'ownerEmail must be a valid email address.' });
     if (!Number.isFinite(Number(body.price)) || Number(body.price) <= 0) return res.status(400).json({ error: 'price must be greater than 0.' });
     const configuredProjectId = String(body.firebaseProjectId || '').trim();
     if (configuredProjectId && configuredProjectId !== serviceAccount.project_id) return res.status(400).json({ error: 'Firebase Project ID does not match the service-account project_id.' });
@@ -1100,7 +1101,7 @@ app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
       shopId,
       shopName: String(body.shopName).trim(),
       ownerName: String(body.ownerName).trim(),
-      ownerEmail: String(body.ownerEmail).trim(),
+      ownerEmail,
       phone: String(body.phone || '').trim(),
       address: String(body.address || '').trim(),
       price: Number(body.price),
