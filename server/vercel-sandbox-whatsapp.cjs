@@ -28,8 +28,16 @@ async function getSandboxSdk() {
 
 function sandboxAuthOptions() {
   const token = String(process.env.VERCEL_TOKEN || "").trim();
-  const projectId = String(process.env.REBOOK_SANDBOX_PROJECT_ID || "").trim();
-  const teamId = String(process.env.REBOOK_SANDBOX_TEAM_ID || "").trim();
+  const projectId = String(
+    process.env.REBOOK_SANDBOX_PROJECT_ID ||
+    process.env.VERCEL_PROJECT_ID ||
+    ""
+  ).trim();
+  const teamId = String(
+    process.env.REBOOK_SANDBOX_TEAM_ID ||
+    process.env.VERCEL_TEAM_ID ||
+    ""
+  ).trim();
 
   // Sandbox requires token + projectId + teamId as a complete explicit tuple.
   // In Vercel production, omit the tuple and let @vercel/sandbox obtain its
