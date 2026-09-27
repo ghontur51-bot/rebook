@@ -699,11 +699,12 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   if (schedule.lastRunDate === dayKey) return { shopId: shop.shopId, status: 'already-ran', eligible: 0, queued: 0, failed: 0 };
 
   const { serviceAccount, projectId } = await getShopFirebase(shop);
-  const [customers, bookings, automations, automationRuns] = await Promise.all([
+  const [customers, bookings, automations, automationRuns, staff] = await Promise.all([
     listDocuments(serviceAccount, projectId, 'customers'),
     listDocuments(serviceAccount, projectId, 'bookings'),
     listDocuments(serviceAccount, projectId, 'automations'),
     listDocuments(serviceAccount, projectId, 'automationRuns'),
+    listDocuments(serviceAccount, projectId, 'staff'),
   ]);
 
   const customerById = new Map(customers.map((customer) => [Number(customer.id), customer]));
@@ -780,6 +781,46 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
         message: personalizeAutomationMessage(auto, customer),
         dedupeKey,
       });
+    }
+  }
+
+  const staffWorkMessages = [];
+  if (schedule.staffWorkMessagingEnabled) {
+    const workDate = schedule.staffWorkDay === 'tomorrow'
+      ? dateKeyFromParts(addCalendarDays(localNow, 1))
+      : dayKey;
+    const formattedWorkDate = formatAutomationWorkDate(workDate);
+
+    for (const assistant of staff.filter((item) => item.active !== false)) {
+      const phone = String(assistant.phone || '').replace(/\D/g, '').slice(-10);
+      if (!/^\d{10}$/.test(phone) || !String(assistant.template || '').trim()) continue;
+
+      const work = bookings.filter((booking) => {
+        if (booking.date !== workDate) return false;
+        if (booking.bookingType === 'walk-in' || booking.status === 'cancelled') return false;
+        if (booking.staffId !== undefined && booking.staffId !== null) {
+          return String(booking.staffId) === String(assistant.id);
+        }
+        return String(booking.staff || '').trim().toLowerCase() === String(assistant.name || '').trim().toLowerCase();
+      });
+
+      if (!work.length) continue;
+
+      const workText = work.slice().sort((a, b) => {
+        const timeDiff = timeToMinutesServer(a.time) - timeToMinutesServer(b.time);
+        if (Number.isFinite(timeDiff) && timeDiff !== 0) return timeDiff;
+        return Number(a.id) - Number(b.id);
+      }).map((booking) =>
+        `${booking.time}: ${booking.customer} - ${booking.service} (₹${booking.amount})`
+      ).join('\\n');
+
+      const message = String(assistant.template || '')
+        .replace(/\{assistant\}/gi, String(assistant.name || ''))
+        .replace(/\{date\}/gi, formattedWorkDate)
+        .replace(/\{count\}/gi, String(work.length))
+        .replace(/\{work\}/gi, workText);
+
+      staffWorkMessages.push({ phone, name: String(assistant.name || 'Assistant'), message });
     }
   }
 
