@@ -556,8 +556,6 @@ async function executeBlast(shopId, s, blast) {
           return;
         }
       }
-    } else {
-      s.activeBlast = freshBlast();
     }
   }
 }
