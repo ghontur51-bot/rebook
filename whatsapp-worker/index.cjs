@@ -342,7 +342,11 @@ async function initializeSession(shopId) {
 
 async function getSessionReady(shopId) {
   const s = getSession(shopId);
-  if (!s.client && !s.initializationPromise) await initializeSession(shopId);
+  if (!s.client && !s.initializationPromise) {
+    // Starting WhatsApp Web is intentionally asynchronous. The HTTP caller must
+    // not wait for browser startup / QR generation; /api/status is the source of truth.
+    void initializeSession(shopId);
+  }
   return s;
 }
 
