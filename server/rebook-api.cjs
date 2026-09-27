@@ -671,15 +671,71 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   if (schedule.lastRunDate === dayKey) return { shopId: shop.shopId, status: 'already-ran', eligible: 0, queued: 0, failed: 0 };
 
   const { serviceAccount, projectId } = await getShopFirebase(shop);
-  const [customers, automations, automationRuns] = await Promise.all([
+  const [customers, bookings, automations, automationRuns] = await Promise.all([
     listDocuments(serviceAccount, projectId, 'customers'),
+    listDocuments(serviceAccount, projectId, 'bookings'),
     listDocuments(serviceAccount, projectId, 'automations'),
     listDocuments(serviceAccount, projectId, 'automationRuns'),
   ]);
 
+  const customerById = new Map(customers.map((customer) => [Number(customer.id), customer]));
+  const customerByPhone = new Map(
+    customers
+      .map((customer) => [String(customer.phone || '').replace(/\D/g, '').slice(-10), customer])
+      .filter(([phone]) => /^\d{10}$/.test(phone)),
+  );
+
   const eligible = [];
   for (const auto of automations.filter((item) => item.status === 'active' && String(item.action || '').toLowerCase().includes('whatsapp'))) {
-    if (String(auto.trigger || '').toLowerCase().includes('5,000')) continue;
+    const triggerLower = String(auto.trigger || '').toLowerCase();
+
+    if (triggerLower.includes('5,000')) {
+      // Keep the existing event-driven ₹5,000+ behavior, but let the daily
+      // scheduler pick up only newly qualifying bookings since the previous run.
+      // This prevents a first scheduler run from replaying the entire booking history.
+      const previousRunTime = schedule.lastRunAt
+        ? new Date(schedule.lastRunAt).getTime()
+        : Date.now() - 24 * 60 * 60 * 1000;
+      const qualifyingBookings = bookings.filter((booking) => {
+        if (booking.status !== 'confirmed' && booking.status !== 'completed') return false;
+        if (Number(booking.amount) < 5000) return false;
+
+        const eventTimestamp = booking.confirmedAt || booking.createdAt;
+        const eventTime = eventTimestamp ? new Date(eventTimestamp).getTime() : NaN;
+        if (Number.isFinite(eventTime)) return eventTime > previousRunTime;
+
+        // Legacy/imported bookings may only have a calendar date.
+        const bookingDate = String(booking.date || '').slice(0, 10);
+        const todayKey = dayKey;
+        const yesterdayDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const yesterdayParts = getLocalDateParts(yesterdayDate, schedule.timezone);
+        const yesterdayKey = dateKeyFromParts(yesterdayParts);
+        return bookingDate === todayKey || bookingDate === yesterdayKey;
+      });
+
+      for (const booking of qualifyingBookings) {
+        const customer =
+          customerById.get(Number(booking.customerId)) ||
+          customerByPhone.get(String(booking.customerPhone || '').replace(/\D/g, '').slice(-10));
+
+        if (!customer) continue;
+        if (!/^\d{10}$/.test(String(customer.phone || '').replace(/\D/g, '').slice(-10))) continue;
+
+        const dedupeKey = `${auto.id}:customer:${customer.id}:booking:${booking.id}`;
+        if (automationRuns.some((run) => run.dedupeKey === dedupeKey && successfulAutomationRun(run))) continue;
+
+        eligible.push({
+          automationId: Number(auto.id),
+          customerId: Number(customer.id),
+          phone: customer.phone,
+          name: customer.name,
+          message: personalizeAutomationMessage(auto, customer),
+          dedupeKey,
+          triggerBookingId: Number(booking.id),
+        });
+      }
+      continue;
+    }
 
     for (const customer of customers) {
       if (!/^\d{10}$/.test(String(customer.phone || '').replace(/\D/g, '').slice(-10))) continue;
@@ -759,6 +815,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
       runToken,
       runDay: dayKey,
       messageText: item.message,
+      ...(item.triggerBookingId !== undefined ? { triggerBookingId: item.triggerBookingId } : {}),
     }));
 
     // Persist the queued runs BEFORE handing the job to the worker. This closes

@@ -53,7 +53,7 @@
   "crons": [
     {
       "path": "/api/cron/automations",
-      "schedule": "0 0 * * *"
+      "schedule": "30 18 * * *"
     },
     {
       "path": "/api/cron/billing",
