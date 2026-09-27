@@ -328,7 +328,7 @@ function WhatsAppBlastModal({
   const handleSendSingle = async (customer: WACustomer) => {
     if (bridgeStatus.online && bridgeStatus.isReady) {
       setSendList(prev => prev.map(c => c.id === customer.id ? { ...c, status: "sending" } : c));
-      const res = await sendSingleViaBridge(customer.phone, currentMessage, customer.name, true);
+      const res = await sendSingleViaBridge(customer.phone, currentMessage, customer.name);
       if (res.success) {
         setSendList(prev => prev.map(c => c.id === customer.id ? { ...c, status: "sent" } : c));
         setSentCount(prev => Math.min(prev + 1, totalCount));

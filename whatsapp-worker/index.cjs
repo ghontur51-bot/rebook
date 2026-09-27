@@ -15,6 +15,8 @@ const MAX_RECIPIENTS_PER_BLAST = Math.max(1, Math.min(Number(process.env.WHATSAP
 const MAX_SESSIONS = Math.max(1, Number(process.env.WHATSAPP_MAX_SESSIONS || 2));
 const MESSAGE_MAX_LENGTH = 4096;
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+const CONSENT_REBUILD_BLOCK_MESSAGE = "consent system not yet rebuilt";
+
 const OPT_OUT_WORDS = new Set(["stop", "unsubscribe", "unsub", "opt out", "optout", "remove", "do not message", "don't message"]);
 
 const app = express();
@@ -394,6 +396,9 @@ async function notifyAutomationCallback(blast) {
 }
 
 async function sendOne(shopId, { phone, message, name }) {
+  console.warn(CONSENT_REBUILD_BLOCK_MESSAGE);
+  throw new Error(CONSENT_REBUILD_BLOCK_MESSAGE);
+
   const s = await getSessionReady(shopId);
   if (!s.isReady || !s.client) throw new Error("WhatsApp is not connected. Scan the QR code first.");
 
