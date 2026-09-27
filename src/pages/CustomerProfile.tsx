@@ -7,9 +7,6 @@ interface Customer {
   id: number; name: string; phone: string; email: string; status: string;
   lastVisit: string; totalVisits: number; totalSpend: number; favouriteService: string;
   tags: string[]; notes: string; avatar: string;
-  whatsappOptIn?: boolean;
-  whatsappOptInAt?: string;
-  whatsappOptInSource?: string;
 }
 
 const TODAY = new Date();
@@ -196,15 +193,7 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
                       )}
                     </div>
                   </div>
-                  <div style={{ marginTop: 18, padding: "14px", background: customer.whatsappOptIn ? "#F0FDF4" : "#FFFBEB", border: `1px solid ${customer.whatsappOptIn ? "#A7F3D0" : "#FDE68A"}`, borderRadius: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 13 }}>WhatsApp messaging consent</div>
-                        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3 }}>
-                          {customer.whatsappOptIn
-                            ? `Opted in${customer.whatsappOptInAt ? ` on ${new Date(customer.whatsappOptInAt).toLocaleDateString("en-IN")}` : ""}.`
-                            : "No explicit WhatsApp opt-in recorded. Sending is blocked until consent is recorded."}
-                        </div>
+iv>
                       </div>
                       <button
                         onClick={() => {
@@ -360,23 +349,6 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
                 <textarea className="input" style={{ minHeight: 120, resize: "vertical", lineHeight: 1.6 }} value={message} onChange={e => setMessage(e.target.value)} />
                 <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 4 }}>{message.length} characters</div>
               </div>
-              {sendChannel === "WhatsApp" && (
-                <div style={{ marginBottom: 18, padding: "12px 14px", background: customer.whatsappOptIn ? "#F0FDF4" : "#FEF2F2", border: `1px solid ${customer.whatsappOptIn ? "#A7F3D0" : "#FECACA"}`, borderRadius: 10 }}>
-                  <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#334155", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={whatsappConsentConfirmed}
-                      disabled={!customer.whatsappOptIn}
-                      onChange={(e) => setWhatsappConsentConfirmed(e.target.checked)}
-                      style={{ marginTop: 2 }}
-                    />
-                    <span>
-                      I confirm this customer has explicitly opted in to receive WhatsApp messages from this business, and that the message category is covered by that consent.
-                    </span>
-                  </label>
-                  {!customer.whatsappOptIn && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: "#B91C1C" }}>Record the customer's WhatsApp opt-in on the profile before sending.</div>
-                  )}
                 </div>
               )}
 
@@ -393,13 +365,9 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
                   onClick={async () => {
                     if (sendChannel === "WhatsApp") {
                       try {
-                        if (!customer.whatsappOptIn || !whatsappConsentConfirmed) {
-                          setPopupData({ isOpen: true, title: "WhatsApp consent required", message: "Record explicit WhatsApp opt-in and confirm it before sending.", type: "warning" });
-                          return;
-                        }
                         const bridge = await getBridgeStatus();
                         if (bridge.online && bridge.isReady) {
-                          const res = await sendSingleViaBridge(customer.phone, message, customer.name, true);
+                          const res = await sendSingleViaBridge(customer.phone, message, customer.name);
                           if (res.success) {
                             logCustomerMessage(customer.id, message, sendChannel);
                             setPopupData({ isOpen: true, title: "Message Submitted", message: `The message was submitted to WhatsApp for ${customer.name}. Delivery/read status is not guaranteed by the bridge.`, type: "success" });
