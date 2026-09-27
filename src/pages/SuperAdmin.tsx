@@ -136,6 +136,7 @@ export default function SuperAdmin() {
               <div key={key}>
                 <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 6 }}>{label}</label>
                 <input className="input" value={(form as any)[key]} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))} />
+                {key === "ownerEmail" && <div style={{ marginTop: 4, fontSize: 11, color: "var(--muted-foreground)" }}>Optional. Leave blank if the shop owner does not have an email address.</div>}
               </div>
             ))}
           </div>
