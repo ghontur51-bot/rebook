@@ -106,7 +106,7 @@ export default function Bookings() {
       // block booking; only enforce the schedule when the data actually exists.
       const dayName = new Date(`${form.date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
       const workingDays = Array.isArray(selectedStaff.workingDays) ? selectedStaff.workingDays : [];
-      if (workingDays.length > 0 && !workingDays.includes(dayName)) {
+      if (workingDays.length > 0 && dayName !== "Sunday" && !workingDays.includes(dayName)) {
         setBookingError(`${selectedStaff.name} is not working on ${dayName}.`);
         return;
       }
