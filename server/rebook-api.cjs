@@ -1080,7 +1080,7 @@ app.post('/api/admin/shops', requireAdmin, async (req, res, next) => {
     }
     if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) return res.status(400).json({ error: 'Firebase service account JSON is missing project_id/client_email/private_key.' });
     const ownerEmail = String(body.ownerEmail || '').trim();
-    if (ownerEmail && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(ownerEmail)) return res.status(400).json({ error: 'ownerEmail must be a valid email address.' });
+    if (ownerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) return res.status(400).json({ error: 'ownerEmail must be a valid email address.' });
     if (!Number.isFinite(Number(body.price)) || Number(body.price) <= 0) return res.status(400).json({ error: 'price must be greater than 0.' });
     const configuredProjectId = String(body.firebaseProjectId || '').trim();
     if (configuredProjectId && configuredProjectId !== serviceAccount.project_id) return res.status(400).json({ error: 'Firebase Project ID does not match the service-account project_id.' });
