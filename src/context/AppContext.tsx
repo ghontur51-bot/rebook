@@ -1001,18 +1001,34 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
 
 
   // --- Dynamic Derived Stats ---
-  // Confirmed & Completed bookings
+  // Demo mode keeps the designed sample analytics. Cloud shops must start from
+  // their real Firestore data instead of inheriting demo revenue baselines.
   const confirmedBookings = bookings.filter((b) => b.status === "confirmed" || b.status === "completed");
 
-  // Initial confirmed baseline was IDs 1, 2, 4, 5 (2800 + 500 + 4500 + 3200 = 11,000)
-  // Any booking confirmed beyond that (e.g. pending ones confirmed: #3 Anjali ₹700, #6 Meena ₹1200, or any newly created bookings)
-  // dynamically adds to totalRecoveredRevenue!
+  const recoveredBookingIds = new Set(
+    runsRef.current
+      .filter((run) =>
+        (run.status === "sent" || run.status === "recorded") &&
+        run.bookingId !== undefined
+      )
+      .map((run) => Number(run.bookingId))
+      .filter((id) => Number.isFinite(id))
+  );
+
+  const cloudRecoveredBookings = confirmedBookings.filter((booking) => recoveredBookingIds.has(Number(booking.id)));
+  const cloudRecoveredRevenue = cloudRecoveredBookings.reduce(
+    (sum, booking) => sum + (Number(booking.amount) || 0),
+    0,
+  );
+
+  // Demo mode preserves the original sample analytics. Every new cloud shop
+  // starts at zero and only grows when an actual automation-attributed booking
+  // is recorded in that shop's data.
   const extraBookingRevenue = confirmedBookings.reduce((sum, b) => {
-    if ([1, 2, 4, 5].includes(b.id)) return sum; // Already part of baseline 68,400
+    if ([1, 2, 4, 5].includes(b.id)) return sum;
     return sum + (Number(b.amount) || 0);
   }, 0);
 
-  // If any initial baseline booking was cancelled, adjust baseline accordingly
   const baselineDeduction = [1, 2, 4, 5].reduce((sum, baseId) => {
     const b = bookings.find((item) => item.id === baseId);
     if (!b || b.status === "cancelled") {
@@ -1022,35 +1038,40 @@ export function AppProvider({ children, runtime = null }: { children: React.Reac
     return sum;
   }, 0);
 
-  const totalRecoveredRevenue = Math.max(0, 68400 - baselineDeduction + extraBookingRevenue);
+  const demoRecoveredRevenue = Math.max(0, 68400 - baselineDeduction + extraBookingRevenue);
+  const totalRecoveredRevenue = isCloud ? cloudRecoveredRevenue : demoRecoveredRevenue;
 
-  // Monthly revenue data dynamically adjusted for confirmed bookings
+  // Build the recovered-revenue series from real automation-attributed bookings
+  // for cloud shops. Demo mode keeps the existing sample analytics.
   const monthlyRevenueData = initialAnalyticsData.monthly.map((m) => {
-    // Calculate extra confirmed bookings revenue falling into this month
-    const extraForMonth = confirmedBookings.reduce((sum, b) => {
-      if ([1, 2, 4, 5].includes(b.id)) return sum;
-      let bMonth = "Sep";
-      if (b.date) {
-        try {
-          bMonth = new Date(b.date).toLocaleString("en-US", { month: "short" });
-        } catch (e) {}
+    if (!isCloud) {
+      const extraForMonth = confirmedBookings.reduce((sum, b) => {
+        if ([1, 2, 4, 5].includes(b.id)) return sum;
+        let bMonth = "Sep";
+        if (b.date) {
+          try {
+            bMonth = new Date(b.date).toLocaleString("en-US", { month: "short" });
+          } catch (e) {}
+        }
+        return bMonth === m.month ? sum + (Number(b.amount) || 0) : sum;
+      }, 0);
+      const wonBackCount = customers.filter((c) => c.status === "won_back").length;
+      return m.month === "Sep"
+        ? { ...m, revenue: m.revenue + extraForMonth, returned: Math.max(m.returned, wonBackCount) }
+        : { ...m, revenue: m.revenue + extraForMonth };
+    }
+
+    const recoveredForMonth = cloudRecoveredBookings.reduce((sum, booking) => {
+      if (!booking.date) return sum;
+      try {
+        const bookingMonth = new Date(booking.date).toLocaleString("en-US", { month: "short" });
+        return bookingMonth === m.month ? sum + (Number(booking.amount) || 0) : sum;
+      } catch {
+        return sum;
       }
-      return bMonth === m.month ? sum + (Number(b.amount) || 0) : sum;
     }, 0);
 
-    const wonBackCount = customers.filter((c) => c.status === "won_back").length;
-
-    if (m.month === "Sep") {
-      return {
-        ...m,
-        revenue: m.revenue + extraForMonth,
-        returned: Math.max(m.returned, wonBackCount),
-      };
-    }
-    return {
-      ...m,
-      revenue: m.revenue + extraForMonth,
-    };
+    return { ...m, revenue: recoveredForMonth };
   });
 
   const dynamicCampaigns = campaigns.map((c) => {
