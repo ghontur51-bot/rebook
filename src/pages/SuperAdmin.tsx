@@ -132,7 +132,7 @@ export default function SuperAdmin() {
         <div className="stat-card" style={{ padding: 24, marginBottom: 20 }}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 18 }}>Create Shop</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {[ ["Shop name", "shopName"], ["Owner name", "ownerName"], ["Owner Gmail", "ownerEmail"], ["Phone", "phone"], ["Address", "address"], ["Price / 30 days (₹)", "price" ] ].map(([label, key]) => (
+            {[ ["Shop name", "shopName"], ["Owner name", "ownerName"], ["Owner Email (optional)", "ownerEmail"], ["Phone", "phone"], ["Address", "address"], ["Price / 30 days (₹)", "price" ] ].map(([label, key]) => (
               <div key={key}>
                 <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 6 }}>{label}</label>
                 <input className="input" value={(form as any)[key]} onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))} />
