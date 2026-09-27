@@ -171,7 +171,179 @@ async function launchBootstrapIfNeeded(sandbox) {
   if (versionCheck.exitCode !== 0) {
     await sandbox.runCommand({
       cmd: "sh",
-      args: ["-lc", `pkill -f 'node index.cjs' >/dev/null 2>&1 || true`],
+      args: ["-lc", `for pid in $(pgrep -f '^node index\\.cjs
+      cwd: WORKER_DIR,
+    });
+  }
+
+  if (await isWorkerHealthy(sandbox)) return;
+
+  const lockPresent = await sandbox.runCommand({ cmd: "test", args: ["-f", BOOTSTRAP_LOCK], cwd: WORKER_DIR });
+  if (lockPresent.exitCode === 0) return;
+
+  await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", `sh ${BOOTSTRAP_SCRIPT_PATH} >>/tmp/rebook-wa-bootstrap.log 2>&1`],
+    cwd: WORKER_DIR,
+    env: workerEnv(),
+    sudo: true,
+    detached: true,
+  });
+}
+
+function safeSandboxName(shopId) {
+  const id = String(shopId || "").trim();
+  if (!/^[A-Za-z0-9_-]{3,120}$/.test(id)) {
+    throw new Error("Invalid WhatsApp Sandbox shopId.");
+  }
+  return (SANDBOX_NAME_PREFIX + "-" + id).slice(0, 250);
+}
+
+async function createOrResumeSandbox(shopId) {
+  const sdk = await getSandboxSdk();
+  const auth = sandboxAuthOptions();
+  const options = {
+    name: safeSandboxName(shopId),
+    persistent: true,
+    timeout: SANDBOX_TIMEOUT_MS,
+    snapshotExpiration: SANDBOX_SNAPSHOT_TTL_MS,
+    resources: { vcpus: Number(process.env.VERCEL_SANDBOX_VCPUS || 4) },
+    ports: [WORKER_PORT],
+    networkPolicy: "allow-all",
+    ...auth,
+  };
+
+  return sdk.Sandbox.getOrCreate({
+    ...options,
+    resume: true,
+    onCreate: async (sandbox) => {
+      await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
+      await writeWorkerFiles(sandbox);
+      await launchBootstrapIfNeeded(sandbox);
+    },
+    onResume: async (sandbox) => {
+      await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
+      await writeWorkerFiles(sandbox);
+      await launchBootstrapIfNeeded(sandbox);
+    },
+  });
+}
+
+async function getWhatsAppSandbox(shopId) {
+  const key = String(shopId || "").trim();
+  if (!sandboxPromises.has(key)) {
+    const promise = createOrResumeSandbox(key).catch((error) => {
+      sandboxPromises.delete(key);
+      throw error;
+    });
+    sandboxPromises.set(key, promise);
+  }
+  return sandboxPromises.get(key);
+}
+
+function extractShopId(pathname, options = {}) {
+  try {
+    if (options.body) {
+      const body = typeof options.body === "string" ? JSON.parse(options.body) : options.body;
+      if (body?.shopId) return String(body.shopId);
+    }
+  } catch {}
+  try {
+    const parsed = new URL("https://sandbox.local" + pathname);
+    const shopId = parsed.searchParams.get("shopId");
+    if (shopId) return shopId;
+  } catch {}
+  throw new Error("WhatsApp Sandbox shopId is required.");
+}
+
+async function getWorkerBaseUrl(shopId) {
+  const sandbox = await getWhatsAppSandbox(shopId);
+  // A persistent sandbox may be stopped after its session timeout. Any command
+  // automatically resumes it, which also runs the onResume hook to restart the worker.
+  await sandbox.runCommand("true", []);
+  return String(sandbox.domain(WORKER_PORT)).replace(/\/$/, "");
+}
+
+async function sandboxWorkerFetch(pathname, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.WHATSAPP_SANDBOX_REQUEST_TIMEOUT_MS || 55000));
+
+  try {
+    const shopId = extractShopId(pathname, options);
+    const baseUrl = await getWorkerBaseUrl(shopId);
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", "Bearer " + deriveInternalSecret("rebook-whatsapp-bridge"));
+    headers.set("Content-Type", "application/json");
+
+    const response = await fetch(baseUrl + pathname, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+
+    const bodyText = await response.text();
+    let body = {};
+    try {
+      body = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      body = { error: bodyText || "Invalid WhatsApp Sandbox worker response." };
+    }
+
+    if (!response.ok) {
+      let reason = body.error;
+      if (reason && typeof reason !== "string") {
+        try { reason = JSON.stringify(reason); } catch { reason = String(reason); }
+      }
+      const error = new Error(reason || ("WhatsApp Sandbox worker request failed (" + response.status + ")."));
+      error.status = response.status >= 500 ? 503 : response.status;
+      throw error;
+    }
+
+    return body;
+  } catch (error) {
+    const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
+    const isConnectionIssue = error?.name === "AbortError" || !error?.status;
+
+    // The worker may simply not be listening yet because bootstrap (dnf/npm install) is
+    // still running in the background sandbox — that's expected and can take minutes on a
+    // cold start. Surface it as a normal "still starting" state so the UI's existing poll
+    // loop keeps waiting instead of showing a hard, retry-button error every few seconds.
+    if (isStatusOrConnect && isConnectionIssue) {
+      return {
+        success: true,
+        online: true,
+        isReady: false,
+        hasQr: false,
+        qrDataUrl: null,
+        clientInfo: null,
+        connectionState: "PROVISIONING",
+        initializationError: null,
+      };
+    }
+
+    if (error && error.name === "AbortError") {
+      const timeoutError = new Error("Vercel Sandbox WhatsApp worker is taking too long to start. Please retry in a few seconds.");
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    if (!error?.status) {
+      console.error("Vercel Sandbox WhatsApp worker error:", error);
+      const unavailable = new Error("Vercel Sandbox WhatsApp worker is currently unavailable. Please retry.");
+      unavailable.status = 503;
+      throw unavailable;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+module.exports = {
+  sandboxWorkerFetch,
+  getWhatsAppSandbox,
+  getWorkerBaseUrl,
+};
+ 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`],
       cwd: WORKER_DIR,
     });
   }
