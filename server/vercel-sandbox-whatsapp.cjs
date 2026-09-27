@@ -10,7 +10,7 @@ const SANDBOX_SNAPSHOT_TTL_MS = Number(process.env.REBOOK_SANDBOX_SNAPSHOT_TTL_M
 const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
-const WORKER_VERSION = "2026-09-26-sandbox-v3";
+const WORKER_VERSION = "2026-09-27-sandbox-v4";
 function deriveInternalSecret(label) {
   const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
   if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
@@ -159,6 +159,23 @@ async function isWorkerHealthy(sandbox) {
 // already running in the background (lock file present) it's also a fast no-op; only a
 // genuinely idle sandbox launches a new detached bootstrap run.
 async function launchBootstrapIfNeeded(sandbox) {
+  // A persistent Sandbox may already have a healthy worker process from an older
+  // deployment. Restart it whenever the deployed worker version changes so old
+  // runtime code cannot remain alive indefinitely.
+  const versionCheck = await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", `test "$(cat .worker-version 2>/dev/null)" = "${WORKER_VERSION}"`],
+    cwd: WORKER_DIR,
+  });
+
+  if (versionCheck.exitCode !== 0) {
+    await sandbox.runCommand({
+      cmd: "sh",
+      args: ["-lc", `pkill -f 'node index.cjs' >/dev/null 2>&1 || true`],
+      cwd: WORKER_DIR,
+    });
+  }
+
   if (await isWorkerHealthy(sandbox)) return;
 
   const lockPresent = await sandbox.runCommand({ cmd: "test", args: ["-f", BOOTSTRAP_LOCK], cwd: WORKER_DIR });
