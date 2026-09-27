@@ -533,6 +533,8 @@ const DEFAULT_AUTOMATION_SCHEDULE = {
   lastRunAt: null,
   lastRunStatus: 'never',
   lastRunSummary: null,
+  staffWorkMessagingEnabled: false,
+  staffWorkDay: 'today',
 };
 
 function normalizeAutomationSchedule(value) {
