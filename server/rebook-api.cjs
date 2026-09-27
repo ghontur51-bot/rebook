@@ -533,8 +533,6 @@ const DEFAULT_AUTOMATION_SCHEDULE = {
   lastRunAt: null,
   lastRunStatus: 'never',
   lastRunSummary: null,
-  staffWorkMessagingEnabled: false,
-  staffWorkDay: 'today',
 };
 
 function normalizeAutomationSchedule(value) {
@@ -546,8 +544,6 @@ function normalizeAutomationSchedule(value) {
     enabled: value?.enabled !== false,
     runHour: Number.isInteger(runHour) && runHour >= 0 && runHour <= 23 ? runHour : DEFAULT_AUTOMATION_SCHEDULE.runHour,
     timezone,
-    staffWorkMessagingEnabled: value?.staffWorkMessagingEnabled === true,
-    staffWorkDay: value?.staffWorkDay === 'tomorrow' ? 'tomorrow' : 'today',
   };
 }
 
@@ -586,30 +582,6 @@ function getLocalDateParts(date, timezone) {
       hour: Number(parts.hour),
     };
   }
-}
-
-function addCalendarDays(parts, days) {
-  const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
-  base.setUTCDate(base.getUTCDate() + Number(days || 0));
-  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
-}
-
-function formatAutomationWorkDate(dateKey) {
-  const [year, month, day] = String(dateKey).split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', timeZone: 'UTC' });
-}
-
-function timeToMinutesServer(time) {
-  const match = String(time || '').trim().match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
-  if (!match) return NaN;
-  let hour = Number(match[1]);
-  const minute = Number(match[2]);
-  const meridiem = match[3]?.toUpperCase();
-  if (meridiem) {
-    if (hour === 12) hour = 0;
-    if (meridiem === 'PM') hour += 12;
-  }
-  return hour * 60 + minute;
 }
 
 function dateKeyFromParts(parts) {
@@ -699,12 +671,11 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   if (schedule.lastRunDate === dayKey) return { shopId: shop.shopId, status: 'already-ran', eligible: 0, queued: 0, failed: 0 };
 
   const { serviceAccount, projectId } = await getShopFirebase(shop);
-  const [customers, bookings, automations, automationRuns, staff] = await Promise.all([
+  const [customers, bookings, automations, automationRuns] = await Promise.all([
     listDocuments(serviceAccount, projectId, 'customers'),
     listDocuments(serviceAccount, projectId, 'bookings'),
     listDocuments(serviceAccount, projectId, 'automations'),
     listDocuments(serviceAccount, projectId, 'automationRuns'),
-    listDocuments(serviceAccount, projectId, 'staff'),
   ]);
 
   const customerById = new Map(customers.map((customer) => [Number(customer.id), customer]));
@@ -784,63 +755,23 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     }
   }
 
-  const staffWorkMessages = [];
-  if (schedule.staffWorkMessagingEnabled) {
-    const workDate = schedule.staffWorkDay === 'tomorrow'
-      ? dateKeyFromParts(addCalendarDays(localNow, 1))
-      : dayKey;
-    const formattedWorkDate = formatAutomationWorkDate(workDate);
-
-    for (const assistant of staff.filter((item) => item.active !== false)) {
-      const phone = String(assistant.phone || '').replace(/\D/g, '').slice(-10);
-      if (!/^\d{10}$/.test(phone) || !String(assistant.template || '').trim()) continue;
-
-      const work = bookings.filter((booking) => {
-        if (booking.date !== workDate) return false;
-        if (booking.bookingType === 'walk-in' || booking.status === 'cancelled') return false;
-        if (booking.staffId !== undefined && booking.staffId !== null) {
-          return String(booking.staffId) === String(assistant.id);
-        }
-        return String(booking.staff || '').trim().toLowerCase() === String(assistant.name || '').trim().toLowerCase();
-      });
-
-      if (!work.length) continue;
-
-      const workText = work.slice().sort((a, b) => {
-        const timeDiff = timeToMinutesServer(a.time) - timeToMinutesServer(b.time);
-        if (Number.isFinite(timeDiff) && timeDiff !== 0) return timeDiff;
-        return Number(a.id) - Number(b.id);
-      }).map((booking) =>
-        `${booking.time}: ${booking.customer} - ${booking.service} (₹${booking.amount})`
-      ).join('\\n');
-
-      const message = String(assistant.template || '')
-        .replace(/\{assistant\}/gi, String(assistant.name || ''))
-        .replace(/\{date\}/gi, formattedWorkDate)
-        .replace(/\{count\}/gi, String(work.length))
-        .replace(/\{work\}/gi, workText);
-
-      staffWorkMessages.push({ phone, name: String(assistant.name || 'Assistant'), message });
-    }
-  }
-
   const baseSchedule = {
     ...schedule,
     lastRunAt: now.toISOString(),
     lastRunDate: dayKey,
   };
 
-  if (!eligible.length && !staffWorkMessages.length) {
+  if (!eligible.length) {
     const updatedSchedule = {
       ...baseSchedule,
       lastRunStatus: 'success',
-      lastRunSummary: { eligible: 0, queued: 0, failed: 0, staffSent: 0, staffFailed: 0 },
+      lastRunSummary: { eligible: 0, queued: 0, failed: 0 },
     };
     await setShopAutomationScheduler(shop, updatedSchedule);
-    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0, staffSent: 0, staffFailed: 0 };
+    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0 };
   }
 
-  if (eligible.length && !AUTOMATION_CALLBACK_SECRET) {
+  if (!AUTOMATION_CALLBACK_SECRET) {
     const failedSchedule = {
       ...baseSchedule,
       lastRunStatus: 'failed',
@@ -868,8 +799,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
 
   let queued = 0;
   let failed = 0;
-  let staffSent = 0;
-  let staffFailed = 0;
   let currentRuns = [...automationRuns];
 
   for (let offset = 0; offset < eligible.length; offset += batchSize) {
@@ -944,24 +873,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     }
   }
 
-  for (const staffMessage of staffWorkMessages) {
-    try {
-      await whatsappBridgeFetch('/api/send-single', {
-        method: 'POST',
-        body: JSON.stringify({
-          shopId: shop.shopId,
-          phone: staffMessage.phone,
-          message: staffMessage.message,
-          name: staffMessage.name,
-        }),
-      });
-      staffSent += 1;
-    } catch (error) {
-      staffFailed += 1;
-      console.error('Scheduled staff work message failed:', shop.shopId, staffMessage.name, error.message);
-    }
-  }
-
   const summaryAutomations = automations.map((auto) => automationStatsFor(auto, currentRuns));
   await commitWrites(serviceAccount, projectId, [
     ...summaryAutomations.map((auto) =>
@@ -969,25 +880,21 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     ),
     makeUpdateWrite(projectId, 'automationScheduler', 'current', {
       ...baseSchedule,
-      lastRunStatus: failed > 0 && queued === 0 && staffFailed > 0 ? 'failed' : (failed > 0 || staffFailed > 0) ? 'partial' : 'success',
+      lastRunStatus: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
       lastRunSummary: {
         eligible: eligible.length,
         queued,
-        failed: failed + staffFailed,
-        staffSent,
-        staffFailed,
+        failed,
       },
     }),
   ]);
 
   return {
     shopId: shop.shopId,
-    status: failed > 0 && queued === 0 && staffFailed > 0 ? 'failed' : (failed > 0 || staffFailed > 0) ? 'partial' : 'success',
+    status: failed > 0 && queued === 0 ? 'failed' : failed > 0 ? 'partial' : 'success',
     eligible: eligible.length,
     queued,
-    failed: failed + staffFailed,
-    staffSent,
-    staffFailed,
+    failed,
     batchSize,
     batches: Math.ceil(eligible.length / batchSize),
   };

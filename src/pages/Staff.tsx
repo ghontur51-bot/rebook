@@ -3,15 +3,8 @@ import { useApp } from "../context/AppContext";
 import { sendSingleViaBridge } from "../services/whatsappBridgeService";
 import { PopupCard } from "../components/ModalCard";
 
-function formatAutomationHour(hour: number): string {
-  const safeHour = Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 0;
-  const suffix = safeHour >= 12 ? "PM" : "AM";
-  const hour12 = safeHour % 12 || 12;
-  return `${hour12}:00 ${suffix}`;
-}
-
 export default function Staff() {
-  const { staff, addStaff, updateStaff, deleteStaff, bookings, automationScheduler, updateAutomationScheduler } = useApp();
+  const { staff, addStaff, updateStaff, deleteStaff, bookings } = useApp();
   const [newAssistant, setNewAssistant] = useState({ name: "", phone: "", template: "", active: true });
   const [popupData, setPopupData] = useState<{
     isOpen: boolean;
@@ -70,53 +63,6 @@ export default function Staff() {
           <textarea className="input" placeholder="Template" value={newAssistant.template} onChange={e => setNewAssistant(p => ({ ...p, template: e.target.value }))} />
            <button className="btn-primary" onClick={() => { if(newAssistant.name) { addStaff(newAssistant as any); setNewAssistant({ name: "", phone: "", template: "", active: true }); } }}>Add</button>
 
-        </div>
-      </div>
-
-      {/* Automatic Work Messages */}
-      <div className="stat-card" style={{ marginBottom: 20, padding: "24px" }}>
-        <div style={{ fontWeight: 700, fontSize: 15, fontFamily: "'Plus Jakarta Sans', sans-serif", marginBottom: 6 }}>
-          ⚡ Automatic Work Messages
-        </div>
-        <div style={{ fontSize: 13, color: "var(--muted-foreground)", lineHeight: 1.5, marginBottom: 18 }}>
-          Automatically send each assistant's scheduled work using the daily automation run time.
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 6 }}>Work date</label>
-            <select
-              className="input"
-              value={automationScheduler.staffWorkDay}
-              onChange={e => updateAutomationScheduler({ staffWorkDay: e.target.value as "today" | "tomorrow" })}
-            >
-              <option value="today">Today</option>
-              <option value="tomorrow">Tomorrow</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 6 }}>Automatic send time</label>
-            <div
-              className="input"
-              style={{ display: "flex", alignItems: "center", color: "var(--foreground)", background: "#F8FAFC" }}
-            >
-              {formatAutomationHour(automationScheduler.runHour)} · {automationScheduler.timezone}
-            </div>
-          </div>
-
-          <label className="toggle" title={automationScheduler.staffWorkMessagingEnabled ? "Disable automatic work messages" : "Enable automatic work messages"}>
-            <input
-              type="checkbox"
-              checked={automationScheduler.staffWorkMessagingEnabled}
-              onChange={e => updateAutomationScheduler({ staffWorkMessagingEnabled: e.target.checked })}
-            />
-            <span className="toggle-slider" />
-          </label>
-        </div>
-
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--muted-foreground)" }}>
-          The send time is controlled from Automations → Daily Automation Run.
         </div>
       </div>
 
