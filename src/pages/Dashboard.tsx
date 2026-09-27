@@ -18,7 +18,7 @@ function StatCard({ label, value, sub, icon, color, onClick }: any) {
     <div className="stat-card" style={{ cursor: onClick ? "pointer" : "default" }} onClick={onClick}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <div style={{ fontSize: 13, color: "var(--muted-foreground)", fontWeight: 500, marginBottom: 8 }}>
+          <div style={{ fontSize: 13, color: "var(--muted-foreground)", fontWeight: 500, marginBottom: 8, minHeight: 32 }}>
             {label}
           </div>
           <div
