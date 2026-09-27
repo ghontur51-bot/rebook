@@ -153,6 +153,19 @@ function cleanupLegacySessionFolders() {
   }
 }
 
+function cleanupChromiumSingletonLocks(userDataDir) {
+  const lockNames = ["SingletonLock", "SingletonSocket", "SingletonCookie"];
+  for (const lockName of lockNames) {
+    try {
+      fs.rmSync(path.join(userDataDir, lockName), { force: true });
+    } catch (error) {
+      if (error && error.code !== "ENOENT") {
+        console.warn(`Unable to remove Chromium ${lockName}: ${error.message}`);
+      }
+    }
+  }
+}
+
 function resolvePuppeteer() {
   const whatsappEntry = require.resolve("whatsapp-web.js");
   const puppeteerEntry = require.resolve("puppeteer", { paths: [path.dirname(whatsappEntry)] });
@@ -208,9 +221,12 @@ async function initializeSession(shopId) {
   s.initializationStartedAt = new Date().toISOString();
 
   s.initializationPromise = (async () => {
+    const sessionUserDataDir = path.join(SESSION_DIR, `session-${shopId}`);
+    cleanupChromiumSingletonLocks(sessionUserDataDir);
     const executablePath = await initializeBrowserPreflight();
     const { Client, LocalAuth } = require("whatsapp-web.js");
 
+    cleanupChromiumSingletonLocks(sessionUserDataDir);
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: shopId, dataPath: SESSION_DIR }),
       puppeteer: {
