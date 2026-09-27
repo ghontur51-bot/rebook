@@ -193,24 +193,7 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
                       )}
                     </div>
                   </div>
-iv>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const next = !customer.whatsappOptIn;
-                          updateCustomer(customer.id, {
-                            whatsappOptIn: next,
-                            whatsappOptInAt: next ? new Date().toISOString() : undefined,
-                            whatsappOptInSource: next ? "ReBook customer profile" : undefined,
-                          });
-                        }}
-                        className="btn-secondary"
-                        style={{ fontSize: 12, padding: "7px 12px" }}
-                      >
-                        {customer.whatsappOptIn ? "Opt out" : "Record opt-in"}
-                      </button>
-                    </div>
-                  </div>
+
                   <div style={{ marginTop: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>Notes</div>
