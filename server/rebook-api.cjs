@@ -588,6 +588,30 @@ function getLocalDateParts(date, timezone) {
   }
 }
 
+function addCalendarDays(parts, days) {
+  const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  return { year: base.getUTCFullYear(), month: base.getUTCMonth() + 1, day: base.getUTCDate() };
+}
+
+function formatAutomationWorkDate(dateKey) {
+  const [year, month, day] = String(dateKey).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+}
+
+function timeToMinutesServer(time) {
+  const match = String(time || '').trim().match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+  if (!match) return NaN;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem) {
+    if (hour === 12) hour = 0;
+    if (meridiem === 'PM') hour += 12;
+  }
+  return hour * 60 + minute;
+}
+
 function dateKeyFromParts(parts) {
   return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
 }
