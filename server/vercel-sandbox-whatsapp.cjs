@@ -171,7 +171,7 @@ async function launchBootstrapIfNeeded(sandbox) {
   if (versionCheck.exitCode !== 0) {
     await sandbox.runCommand({
       cmd: "sh",
-      args: ["-lc", `for pid in $(pgrep -f '^node index\\.cjs
+      args: ["-lc", "for pid in $(pgrep -f '^node index\\.cjs$' || true); do kill \"$pid\" 2>/dev/null || true; done"],
       cwd: WORKER_DIR,
     });
   }
@@ -241,6 +241,19 @@ async function getWhatsAppSandbox(shopId) {
   return sandboxPromises.get(key);
 }
 
+function isSandboxPortNotListeningError(error) {
+  if (!error) return false;
+
+  const candidates = [error?.message, error?.detail, error?.response?.message, error?.cause?.message];
+  if (candidates.some((value) => typeof value === "string" && value.includes("This sandbox is not listening on the requested port."))) return true;
+
+  try {
+    return JSON.stringify(error).includes("This sandbox is not listening on the requested port.");
+  } catch {
+    return false;
+  }
+}
+
 function extractShopId(pathname, options = {}) {
   try {
     if (options.body) {
@@ -302,7 +315,8 @@ async function sandboxWorkerFetch(pathname, options = {}) {
     return body;
   } catch (error) {
     const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
-    const isConnectionIssue = error?.name === "AbortError" || !error?.status;
+    const isSandboxPortNotListening = isSandboxPortNotListeningError(error);
+    const isConnectionIssue = error?.name === "AbortError" || !error?.status || isSandboxPortNotListening;
 
     // The worker may simply not be listening yet because bootstrap (dnf/npm install) is
     // still running in the background sandbox — that's expected and can take minutes on a
