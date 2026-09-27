@@ -52,7 +52,7 @@ export default function Staff() {
           <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr auto", gap: 10, marginBottom: 10 }}>
             <input className="input" value={a.name} onChange={e => updateStaff(a.id, { name: e.target.value })} />
             <input className="input" value={a.phone} onChange={e => updateStaff(a.id, { phone: e.target.value })} />
-            <input className="input" value={a.template} onChange={e => updateStaff(a.id, { template: e.target.value })} />
+            <textarea className="input" value={a.template} onChange={e => updateStaff(a.id, { template: e.target.value })} />
             <button className="btn-secondary" onClick={() => deleteStaff(a.id)}>Delete</button>
           </div>
         ))}
@@ -60,7 +60,7 @@ export default function Staff() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr auto", gap: 10, marginTop: 15, borderTop: "1px solid var(--border)", paddingTop: 15 }}>
           <input className="input" placeholder="Name" value={newAssistant.name} onChange={e => setNewAssistant(p => ({ ...p, name: e.target.value }))} />
           <input className="input" placeholder="WhatsApp Phone" value={newAssistant.phone} onChange={e => setNewAssistant(p => ({ ...p, phone: e.target.value }))} />
-          <input className="input" placeholder="Template" value={newAssistant.template} onChange={e => setNewAssistant(p => ({ ...p, template: e.target.value }))} />
+          <textarea className="input" placeholder="Template" value={newAssistant.template} onChange={e => setNewAssistant(p => ({ ...p, template: e.target.value }))} />
            <button className="btn-primary" onClick={() => { if(newAssistant.name) { addStaff(newAssistant as any); setNewAssistant({ name: "", phone: "", template: "", active: true }); } }}>Add</button>
 
         </div>
@@ -150,4 +150,3 @@ export default function Staff() {
     </div>
   );
 }
-
