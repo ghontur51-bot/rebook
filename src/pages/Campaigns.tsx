@@ -36,7 +36,7 @@ function resolveAudience(audience: string, customers: Customer[], bookings: Retu
 }
 
 function resolveWhatsAppAudience(audience: string, customers: Customer[], bookings: ReturnType<typeof useApp>["bookings"]) {
-  return resolveAudience(audience, customers, bookings).filter((customer) => customer.whatsappOptIn === true && String(customer.phone || "").trim());
+  return resolveAudience(audience, customers, bookings).filter((customer) => String(customer.phone || "").trim());
 }
 
 type SendStatus = "pending" | "sending" | "sent" | "failed" | "opened";
@@ -237,7 +237,7 @@ function WhatsAppBlastModal({
       setPopupData({
         isOpen: true,
         title: "No eligible recipients",
-        message: "No selected customer has an explicit WhatsApp opt-in. Open a customer profile and record consent first.",
+        message: "No selected customer has a valid phone number.",
         type: "warning"
       });
       return;
@@ -771,7 +771,7 @@ Submitted {totalCount} messages to the local WhatsApp session. WhatsApp delivery
                     Start 100% Automated Blast
                   </button>
                   <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 8 }}>
-Sends one message at a time from the connected WhatsApp session. Only customers with recorded WhatsApp opt-in are eligible.
+Sends one message at a time from the connected WhatsApp session.
                   </div>
                 </div>
               )}
@@ -796,7 +796,7 @@ Sends one message at a time from the connected WhatsApp session. Only customers 
                 Recipients Queue ({totalCount})
               </div>
               <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
-                One at a time · opt-in only
+                One at a time
               </div>
             </div>
 
@@ -1045,7 +1045,7 @@ export default function Campaigns() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         {[
           { label: "Messages Submitted", value: campaigns.reduce((s, c) => s + c.sent, 0).toLocaleString(), icon: "📤" },
-          { label: "Opted-in Customers", value: customers.filter((c) => c.whatsappOptIn === true).length.toLocaleString(), icon: "✅" },
+          { label: "WhatsApp Customers", value: customers.filter((c) => String(c.phone || "").trim()).length.toLocaleString(), icon: "📱" },
           { label: "Total Converted", value: campaigns.reduce((s, c) => s + c.converted, 0).toLocaleString(), icon: "🎯" },
           { label: "Active Campaigns", value: campaigns.filter((c) => c.status === "active" || c.status === "scheduled").length.toLocaleString(), icon: "📣" },
         ].map(s => (
@@ -1107,7 +1107,7 @@ export default function Campaigns() {
                     <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Channel</label>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                       {[
-                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Opt-in required · Vercel Sandbox" },
+                        { id: "WhatsApp", label: "WhatsApp", icon: "📱", desc: "Vercel Sandbox" },
                         { id: "SMS", label: "SMS", icon: "💬", desc: "Reliable fallback" },
                         { id: "Email", label: "Email", icon: "✉️", desc: "Best for newsletters" },
                       ].map(ch => (
