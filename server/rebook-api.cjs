@@ -546,6 +546,8 @@ function normalizeAutomationSchedule(value) {
     enabled: value?.enabled !== false,
     runHour: Number.isInteger(runHour) && runHour >= 0 && runHour <= 23 ? runHour : DEFAULT_AUTOMATION_SCHEDULE.runHour,
     timezone,
+    staffWorkMessagingEnabled: value?.staffWorkMessagingEnabled === true,
+    staffWorkDay: value?.staffWorkDay === 'tomorrow' ? 'tomorrow' : 'today',
   };
 }
 
