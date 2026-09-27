@@ -25,10 +25,6 @@ export interface Customer {
   tags: string[];
   notes: string;
   avatar: string;
-  /** Explicit WhatsApp messaging consent. Never inferred from having a phone number. */
-  whatsappOptIn?: boolean;
-  whatsappOptInAt?: string;
-  whatsappOptInSource?: string;
   /** System-controlled lifecycle; tags are not used as the source of truth. */
   lifecycle?: "New" | "Repeat";
 }
@@ -1235,7 +1231,6 @@ async function runAutomationAction(
   const isWhatsApp = actionLower.includes("whatsapp");
 
   if (isWhatsApp) {
-    if (customer.whatsappOptIn !== true) return null;
     const phone = (customer.phone || "").trim();
     if (!phone || normalizePhone(phone).length !== 10) return null;
 
