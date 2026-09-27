@@ -351,10 +351,6 @@ function cleanupRecent(s) {
   for (const [key, time] of s.recentSends) if (time < cutoff) s.recentSends.delete(key);
 }
 
-function assertConsent(consentConfirmed) {
-  if (consentConfirmed !== true) throw new Error("Sending is blocked until explicit WhatsApp opt-in is confirmed.");
-}
-
 async function notifyAutomationCallback(blast) {
   if (!blast.automation || !blast.callbackUrl || !blast.callbackSecret || !blast.runToken) return;
 
@@ -565,8 +561,7 @@ app.post("/api/connect", async (req, res) => {
 
 app.post("/api/send-single", async (req, res) => {
   try {
-    const { shopId, phone, message, name, consentConfirmed } = req.body || {};
-    assertConsent(consentConfirmed);
+    const { shopId, phone, message, name } = req.body || {};
     const result = await sendOne(shopId, { phone, message, name });
     res.json({ success: true, ...result });
   } catch (error) {
@@ -576,8 +571,7 @@ app.post("/api/send-single", async (req, res) => {
 
 app.post("/api/blast", async (req, res) => {
   try {
-    const { shopId, recipients, message, campaignName, consentConfirmed, automation, callbackUrl, callbackSecret, runToken, delayMs } = req.body || {};
-    assertConsent(consentConfirmed);
+    const { shopId, recipients, message, campaignName, automation, callbackUrl, callbackSecret, runToken, delayMs } = req.body || {};
 
     if (automation === true) {
       if (!callbackUrl || !callbackSecret || !runToken) throw new Error("Automation callback configuration is incomplete.");
