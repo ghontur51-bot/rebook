@@ -43,7 +43,7 @@ Each real shop can use its own Firebase project. The backend stores encrypted se
 
 - Demo WhatsApp access is server-validated and currently uses PIN 7439.
 - Real shops use server-validated shop access tokens.
-- Customer messaging requires explicit WhatsApp opt-in.
+- Customer messaging is governed by the application's configured messaging and suppression logic.
 - Worker requests use a server-only bearer secret.
 - Scheduled automation callbacks use a separate server-only callback secret.
 - Do not commit .env, service-account JSON, or private keys.
