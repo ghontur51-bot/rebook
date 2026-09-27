@@ -679,12 +679,13 @@ function WhatsAppBlastModal({
               {isEditing ? (
                 <textarea
                   className="input"
+                  rows={5}
                   style={{ minHeight: 80, fontSize: 13, lineHeight: 1.5, background: "#fff", resize: "vertical" }}
                   value={currentMessage}
                   onChange={e => setCurrentMessage(e.target.value)}
                 />
               ) : (
-                <div style={{ fontSize: 13, lineHeight: 1.5, color: "#065F46" }}>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: "#065F46", whiteSpace: "pre-wrap" }}>
                   {currentMessage.replace("{name}", "there")}
                 </div>
               )}
@@ -1137,6 +1138,7 @@ export default function Campaigns() {
                     <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Message Template</label>
                     <textarea
                       className="input"
+                      rows={5}
                       style={{ minHeight: 120, resize: "vertical" }}
                       placeholder="Hi {name}! ✨ Special offer just for you..."
                       value={form.message}
@@ -1256,7 +1258,7 @@ export default function Campaigns() {
 
               <div style={{ marginBottom: 20 }}>
                 <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Campaign Message</label>
-                <div style={{ background: "#F8FAFC", borderRadius: 8, padding: "12px 14px", fontSize: 13, lineHeight: 1.6, border: "1px solid var(--border)", color: "var(--foreground)" }}>
+                <div style={{ background: "#F8FAFC", borderRadius: 8, padding: "12px 14px", fontSize: 13, lineHeight: 1.6, border: "1px solid var(--border)", color: "var(--foreground)", whiteSpace: "pre-wrap" }}>
                   {detailCampaign.message || `Hi {name}! ✨ Special offer from Glam Studio. Book today and enjoy exclusive discounts!`}
                 </div>
               </div>
