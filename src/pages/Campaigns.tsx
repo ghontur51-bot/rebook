@@ -892,78 +892,161 @@ Sends one message at a time from the connected WhatsApp session.
 
 // --- Campaign Card with WhatsApp button ---
 function CampaignCard({ c, onSendWA, onView, customers, bookings }: any) {
-  const statusMap: Record<string, { label: string; class: string }> = {
-    completed: { label: "Completed", class: "status-active" },
-    active: { label: "Active", class: "status-active" },
-    scheduled: { label: "Scheduled", class: "status-scheduled" },
-    draft: { label: "Draft", class: "status-draft" },
+  const statusMap: Record<string, { label: string; background: string; color: string }> = {
+    completed: { label: "Completed", background: "#DCFCE7", color: "#15803D" },
+    active: { label: "Active", background: "#CCFBF1", color: "#0F766E" },
+    scheduled: { label: "Scheduled", background: "#FEF3C7", color: "#B45309" },
+    draft: { label: "Draft", background: "#F1F5F9", color: "#64748B" },
   };
 
   const audience = resolveAudience(c.audience, customers, bookings);
   const convRate = c.sent > 0 ? Math.round((c.converted / c.sent) * 100) : 0;
+  const status = statusMap[c.status] || statusMap.draft;
 
   return (
     <div
-      className="card"
-      style={{ cursor: "pointer", transition: "all 0.15s ease", border: "1px solid var(--border)" }}
+      style={{
+        background: "#fff",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        overflow: "hidden",
+        cursor: "pointer",
+        transition: "box-shadow 0.15s ease, transform 0.15s ease",
+      }}
       onClick={() => onView(c)}
     >
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <span style={{ fontWeight: 700, fontSize: 16, fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{c.name}</span>
-            <span className={`status-pill ${statusMap[c.status]?.class || "status-draft"}`}>
-              {statusMap[c.status]?.label || c.status}
-            </span>
+      <div style={{ padding: "18px 20px 16px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontWeight: 700,
+                  fontSize: 16,
+                  lineHeight: 1.35,
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  color: "var(--foreground)",
+                  wordBreak: "break-word",
+                }}
+              >
+                {c.name}
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "3px 9px",
+                  borderRadius: 99,
+                  background: status.background,
+                  color: status.color,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {status.label}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted-foreground)", lineHeight: 1.5 }}>
+              {c.channel} • {c.audience} ({audience.length} customers)
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-            {c.channel} • {c.audience} ({audience.length} customers)
+
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--muted-foreground)",
+              whiteSpace: "nowrap",
+              paddingTop: 2,
+              flexShrink: 0,
+            }}
+          >
+            {new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
           </div>
-        </div>
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-          {new Date(c.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
         </div>
       </div>
 
-      {c.sent > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, paddingTop: 14, borderTop: "1px solid var(--border)", marginBottom: 14 }}>
+      {c.sent > 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 0,
+            padding: "14px 20px 16px",
+            borderTop: "1px solid var(--border)",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
           {[
             { label: "Submitted", value: c.sent },
             { label: "Recipients", value: audience.length },
             { label: "Converted", value: `${convRate}%` },
-          ].map(s => (
-            <div key={s.label} style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 700, fontSize: 18, fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{s.label}</div>
+          ].map((s, index) => (
+            <div
+              key={s.label}
+              style={{
+                textAlign: "center",
+                borderLeft: index === 0 ? "none" : "1px solid #F1F5F9",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: 18,
+                  lineHeight: 1.2,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: "var(--foreground)",
+                }}
+              >
+                {s.value}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
+                {s.label}
+              </div>
             </div>
           ))}
         </div>
-      )}
-
-      {c.status === "draft" && (
-        <div style={{ paddingTop: 14, borderTop: "1px solid var(--border)", fontSize: 13, color: "var(--muted-foreground)", marginBottom: 14 }}>
-          Draft • Not yet sent
+      ) : (
+        <div
+          style={{
+            padding: "14px 20px",
+            borderTop: "1px solid var(--border)",
+            borderBottom: "1px solid var(--border)",
+            fontSize: 12,
+            color: "var(--muted-foreground)",
+          }}
+        >
+          {c.status === "draft" ? "Draft • Not yet sent" : "No messages submitted yet"}
         </div>
       )}
 
-      {/* WhatsApp Send Button */}
-      <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+      <div style={{ padding: "12px 16px 16px" }}>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onSendWA(c);
           }}
           style={{
-            width: "100%", padding: "9px 14px", borderRadius: 8, border: "none",
-            background: "linear-gradient(135deg, #25D366, #128C7E)",
-            color: "#fff", fontSize: 13, fontWeight: 700,
+            width: "100%",
+            minHeight: 42,
+            padding: "10px 14px",
+            borderRadius: 8,
+            border: "none",
+            background: "linear-gradient(135deg, #25D366, #0D9488)",
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 700,
             fontFamily: "'Plus Jakarta Sans', sans-serif",
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            boxShadow: "0 2px 8px rgba(37,211,102,0.25)",
-            transition: "all 0.15s ease"
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            boxShadow: "0 2px 8px rgba(13,148,136,0.18)",
+            transition: "all 0.15s ease",
           }}
         >
-          <span style={{ fontSize: 16 }}>📱</span>
+          <span style={{ fontSize: 15 }}>📱</span>
           Send to {audience.length} via WhatsApp
         </button>
       </div>
