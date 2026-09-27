@@ -444,7 +444,9 @@ async function requireShopAccess(req, res, next) {
     const token = String(req.headers['x-shop-access-token'] || '');
     const shop = await getShopRecord(shopId);
     if (!shop || shop.deletedAt) return res.status(404).json({ error: 'Shop not found.' });
-    if (!token || !shop.accessTokenHash || !hashEqual(token, shop.accessTokenHash)) return res.status(401).json({ error: 'Invalid shop access token.' });
+    const tokenHash = token ? sha256(token) : '';
+    const tokenMatches = Boolean(tokenHash && shop.accessTokenHash && /^[0-9a-fA-F]{64}$/.test(shop.accessTokenHash) && crypto.timingSafeEqual(Buffer.from(tokenHash, 'hex'), Buffer.from(shop.accessTokenHash, 'hex')));
+    if (!tokenMatches) return res.status(401).json({ error: 'Invalid shop access token.' });
     await ensureBillingState(shopId);
     const refreshed = await getShopRecord(shopId);
     if (!refreshed || refreshed.status !== 'active') return res.status(423).json({ error: 'Shop access is frozen.', shop: publicShop(refreshed) });
