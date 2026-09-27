@@ -297,6 +297,8 @@ export interface AutomationSchedulerSettings {
   lastRunAt: string | null;
   lastRunStatus: "never" | "success" | "partial" | "failed";
   lastRunSummary: { eligible: number; queued: number; failed: number } | null;
+  staffWorkMessagingEnabled: boolean;
+  staffWorkDay: "today" | "tomorrow";
 }
 
 export const DEFAULT_AUTOMATION_SCHEDULER: AutomationSchedulerSettings = {
@@ -307,6 +309,8 @@ export const DEFAULT_AUTOMATION_SCHEDULER: AutomationSchedulerSettings = {
   lastRunAt: null,
   lastRunStatus: "never",
   lastRunSummary: null,
+  staffWorkMessagingEnabled: false,
+  staffWorkDay: "today",
 };
 
 export function normalizeAutomationScheduler(value?: Partial<AutomationSchedulerSettings> | null): AutomationSchedulerSettings {
@@ -325,6 +329,8 @@ export function normalizeAutomationScheduler(value?: Partial<AutomationScheduler
     lastRunAt: value?.lastRunAt || null,
     lastRunStatus: lastRunStatus === "success" || lastRunStatus === "partial" || lastRunStatus === "failed" ? lastRunStatus : "never",
     lastRunSummary: value?.lastRunSummary || null,
+    staffWorkMessagingEnabled: value?.staffWorkMessagingEnabled === true,
+    staffWorkDay: value?.staffWorkDay === "tomorrow" ? "tomorrow" : "today",
   };
 }
 
