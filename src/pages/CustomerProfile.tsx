@@ -38,7 +38,6 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
   const [sendModal, setSendModal] = useState(false);
   const [popupData, setPopupData] = useState<{ isOpen: boolean; title: string; message: string; type?: "success" | "error" | "info" | "warning" }>({ isOpen: false, title: "", message: "", type: "success" });
   const [sendChannel, setSendChannel] = useState("WhatsApp");
-  const [whatsappConsentConfirmed, setWhatsappConsentConfirmed] = useState(false);
   const [message, setMessage] = useState(`Hi ${customer.name.trim().split(" ")[0]}! We miss you at Glam Studio 💖 Come back this week and get 15% off on any service. Book now!`);
 
   // Book Appointment
@@ -56,7 +55,6 @@ export default function CustomerProfile({ customer, onBack }: { customer: Custom
     setNote(customer.notes || "");
     setTags(customer.tags || []);
     setMessage(`Hi ${customer.name.trim().split(" ")[0]}! We miss you at Glam Studio 💖 Come back this week and get 15% off on any service. Book now!`);
-    setWhatsappConsentConfirmed(false);
     setEditingNote(false);
     setBookForm({
       service: SERVICES[0],
