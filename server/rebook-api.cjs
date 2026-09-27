@@ -675,15 +675,10 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
   ]);
 
   const eligible = [];
-  let skippedNoConsent = 0;
   for (const auto of automations.filter((item) => item.status === 'active' && String(item.action || '').toLowerCase().includes('whatsapp'))) {
     if (String(auto.trigger || '').toLowerCase().includes('5,000')) continue;
 
     for (const customer of customers) {
-      if (customer.whatsappOptIn !== true) {
-        skippedNoConsent += 1;
-        continue;
-      }
       if (!/^\d{10}$/.test(String(customer.phone || '').replace(/\D/g, '').slice(-10))) continue;
       if (!automationRuleThresholdReached(customer, auto.trigger, now, schedule.timezone)) continue;
 
@@ -714,7 +709,7 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
       lastRunSummary: { eligible: 0, queued: 0, failed: 0 },
     };
     await setShopAutomationScheduler(shop, updatedSchedule);
-    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0, skippedNoConsent };
+    return { shopId: shop.shopId, status: 'success', eligible: 0, queued: 0, failed: 0 };
   }
 
   if (!AUTOMATION_CALLBACK_SECRET) {
@@ -786,7 +781,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
           })),
           message: batch[0]?.message || '',
           campaignName: `Scheduled Customer Automations · Batch ${batchNumber}`,
-          consentConfirmed: true,
           automation: true,
           callbackUrl,
           callbackSecret: AUTOMATION_CALLBACK_SECRET,
@@ -841,7 +835,6 @@ async function runScheduledAutomationsForShop(shop, now = new Date()) {
     eligible: eligible.length,
     queued,
     failed,
-    skippedNoConsent,
     batchSize,
     batches: Math.ceil(eligible.length / batchSize),
   };
