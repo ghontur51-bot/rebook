@@ -153,15 +153,6 @@ async function isWorkerHealthy(sandbox) {
   return result.exitCode === 0;
 }
 
-async function isBootstrapRunning(sandbox) {
-  const result = await sandbox.runCommand({
-    cmd: "sh",
-    args: ["-lc", `test -f "${BOOTSTRAP_LOCK}"`],
-    cwd: WORKER_DIR,
-  });
-  return result.exitCode === 0;
-}
-
 // Kicks off (or resumes) provisioning without ever blocking the caller. Safe to call on
 // every request: if the worker is already healthy this is a fast no-op; if bootstrap is
 // already running in the background (lock file present) it's also a fast no-op; only a
@@ -170,10 +161,6 @@ async function restartStaleWorkerIfNeeded(sandbox) {
   const healthy = await isWorkerHealthy(sandbox);
 
   if (!healthy) {
-    if (await isBootstrapRunning(sandbox)) {
-      console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap already running, leaving it untouched`);
-      return;
-    }
     console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale lock and relaunching`);
     await sandbox.runCommand({
       cmd: "sh",
@@ -216,11 +203,6 @@ async function restartStaleWorkerIfNeeded(sandbox) {
 async function launchBootstrapIfNeeded(sandbox) {
   if (await isWorkerHealthy(sandbox)) {
     console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, skipping relaunch`);
-    return;
-  }
-
-  if (await isBootstrapRunning(sandbox)) {
-    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap already running, waiting for worker`);
     return;
   }
 
@@ -334,9 +316,6 @@ async function getWorkerBaseUrl(shopId) {
 
   // Do not request sandbox.domain(5001) until the worker is actually listening.
   if (!(await isWorkerHealthy(sandbox))) {
-    if (await isBootstrapRunning(sandbox)) {
-      return null;
-    }
     await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
     await restartStaleWorkerIfNeeded(sandbox);
     await writeWorkerFiles(sandbox);
