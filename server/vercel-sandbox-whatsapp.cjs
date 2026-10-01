@@ -154,6 +154,23 @@ async function isWorkerHealthy(sandbox) {
   return result.exitCode === 0;
 }
 
+async function isBootstrapRunning(sandbox) {
+  const result = await sandbox.runCommand({
+    cmd: "sh",
+    args: [
+      "-lc",
+      `if [ -f "${BOOTSTRAP_LOCK}" ] && [ -s "${BOOTSTRAP_LOCK}" ]; then
+         age=$(expr $(date +%s) - $(stat -c %Y "${BOOTSTRAP_LOCK}" 2>/dev/null || echo 0) 2>/dev/null || echo 999999);
+         [ "$age" -lt 1800 ];
+       else
+         exit 1;
+       fi`,
+    ],
+    cwd: WORKER_DIR,
+  });
+  return result.exitCode === 0;
+}
+
 // Kicks off (or resumes) provisioning without ever blocking the caller. Safe to call on
 // every request: if the worker is already healthy this is a fast no-op; if bootstrap is
 // already running in the background (lock file present) it's also a fast no-op; only a
@@ -162,7 +179,12 @@ async function restartStaleWorkerIfNeeded(sandbox) {
   const healthy = await isWorkerHealthy(sandbox);
 
   if (!healthy) {
-    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale lock and relaunching`);
+    if (await isBootstrapRunning(sandbox)) {
+      console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap already running, leaving it untouched`);
+      return;
+    }
+
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale worker state`);
     await sandbox.runCommand({
       cmd: "sh",
       args: [
@@ -207,12 +229,17 @@ async function launchBootstrapIfNeeded(sandbox) {
     return;
   }
 
-  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe failed, clearing stale lock and relaunching`);
+  if (await isBootstrapRunning(sandbox)) {
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap already running, waiting for worker`);
+    return;
+  }
+
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: starting bootstrap`);
   await sandbox.runCommand({
     cmd: "sh",
     args: [
       "-lc",
-      `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
+      `rm -f "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
     ],
     cwd: WORKER_DIR,
   });
@@ -225,7 +252,7 @@ async function launchBootstrapIfNeeded(sandbox) {
     sudo: true,
     detached: true,
   });
-  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap launched after failed health probe`);
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: bootstrap launched`);
 }
 
 function safeSandboxName(shopId) {
@@ -268,16 +295,26 @@ async function createOrResumeSandbox(shopId) {
   });
 }
 
-async function getWhatsAppSandbox(shopId) {
+async function getWhatsAppSandbox(shopId, { createIfMissing = true } = {}) {
   const key = String(shopId || "").trim();
-  if (!sandboxPromises.has(key)) {
+  if (!createIfMissing) {
+    const sdk = await getSandboxSdk();
+    return sdk.Sandbox.get({
+      name: safeSandboxName(key),
+      resume: false,
+      ...sandboxAuthOptions(),
+    });
+  }
+
+  const cacheKey = `create:${key}`;
+  if (!sandboxPromises.has(cacheKey)) {
     const promise = createOrResumeSandbox(key).catch((error) => {
-      sandboxPromises.delete(key);
+      sandboxPromises.delete(cacheKey);
       throw error;
     });
-    sandboxPromises.set(key, promise);
+    sandboxPromises.set(cacheKey, promise);
   }
-  return sandboxPromises.get(key);
+  return sandboxPromises.get(cacheKey);
 }
 
 function isSandboxPortNotListeningError(error) {
@@ -310,13 +347,17 @@ function extractShopId(pathname, options = {}) {
   throw new Error("WhatsApp Sandbox shopId is required.");
 }
 
-async function getWorkerBaseUrl(shopId) {
-  const sandbox = await getWhatsAppSandbox(shopId);
+async function getWorkerBaseUrl(shopId, { provision = true } = {}) {
+  const sandbox = await getWhatsAppSandbox(shopId, { createIfMissing: provision });
   // Any command resumes a stopped persistent Sandbox and runs the onResume hook.
   await sandbox.runCommand("true", []);
 
   // Do not request sandbox.domain(5001) until the worker is actually listening.
   if (!(await isWorkerHealthy(sandbox))) {
+    if (!provision) {
+      return null;
+    }
+
     await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
     await restartStaleWorkerIfNeeded(sandbox);
     await writeWorkerFiles(sandbox);
@@ -333,7 +374,8 @@ async function sandboxWorkerFetch(pathname, options = {}) {
 
   try {
     const shopId = extractShopId(pathname, options);
-    const baseUrl = await getWorkerBaseUrl(shopId);
+    const isStatusRequest = pathname.startsWith("/api/status");
+    const baseUrl = await getWorkerBaseUrl(shopId, { provision: !isStatusRequest });
     if (!baseUrl) {
       const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
       if (isStatusOrConnect) {
