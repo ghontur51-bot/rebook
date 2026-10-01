@@ -269,6 +269,7 @@ async function createOrResumeSandbox(shopId) {
   const options = {
     name: safeSandboxName(shopId),
     persistent: true,
+    runtime: "node22",
     timeout: SANDBOX_TIMEOUT_MS,
     snapshotExpiration: SANDBOX_SNAPSHOT_TTL_MS,
     resources: { vcpus: Number(process.env.VERCEL_SANDBOX_VCPUS || 4) },
