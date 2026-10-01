@@ -49,6 +49,11 @@ function sandboxAuthOptions() {
   return {};
 }
 
+function workerSourceHash() {
+  const source = readWorkerSource();
+  return crypto.createHash("sha256").update(source.index).digest("hex");
+}
+
 function workerEnv() {
   return {
     PORT: String(WORKER_PORT),
@@ -62,6 +67,7 @@ function workerEnv() {
     AUTOMATION_CALLBACK_SECRET: deriveInternalSecret("rebook-automation-callback"),
     NODE_ENV: "production",
     REBOOK_WORKER_VERSION: WORKER_VERSION,
+    REBOOK_WORKER_SOURCE_HASH: workerSourceHash(),
   };
 }
 
@@ -200,31 +206,31 @@ async function restartStaleWorkerIfNeeded(sandbox) {
     return;
   }
 
-  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, checking runtime version`);
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, checking worker source`);
 
-  const versionCheck = await sandbox.runCommand({
+  const sourceCheck = await sandbox.runCommand({
     cmd: "sh",
     args: [
       "-lc",
-      `test -f "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" && test "$(cat "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" 2>/dev/null)" != "${WORKER_VERSION}"`,
+      `test -f "${path.posix.join(DATA_DIR, ".worker-source-hash")}" && test "$(cat "${path.posix.join(DATA_DIR, ".worker-source-hash")}" 2>/dev/null)" = "$(printf '%s' "${workerSourceHash()}")"`,
     ],
     cwd: WORKER_DIR,
   });
 
-  if (versionCheck.exitCode === 0) {
-    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: version marker stale, restarting`);
+  if (sourceCheck.exitCode !== 0) {
+    console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: worker source marker stale or missing, restarting`);
     await sandbox.runCommand({
       cmd: "sh",
       args: [
         "-lc",
-        `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
+        `rm -f "${BOOTSTRAP_LOCK}" "${path.posix.join(DATA_DIR, ".worker-runtime-version")}" "${path.posix.join(DATA_DIR, ".worker-version")}" "${path.posix.join(DATA_DIR, ".worker-source-hash")}" && for pid in $(pgrep -f '^node index\\.cjs( |$)' 2>/dev/null || true); do kill "$pid" 2>/dev/null || true; done`,
       ],
       cwd: WORKER_DIR,
     });
     return;
   }
 
-  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, version current, skipping relaunch`);
+  console.log(`[${new Date().toISOString()}] WhatsApp Sandbox: health probe passed, worker source current, skipping relaunch`);
 }
 
 async function launchBootstrapIfNeeded(sandbox) {
