@@ -11,7 +11,10 @@ const DATA_DIR = process.env.WHATSAPP_DATA_DIR || "/data/rebook-whatsapp";
 const SESSION_DIR = path.join(DATA_DIR, "sessions");
 const SUPPRESSION_DIR = path.join(DATA_DIR, "suppression");
 const DEFAULT_COUNTRY_CODE = String(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91").replace(/\D/g, "") || "91";
-const MAX_RECIPIENTS_PER_BLAST = Math.max(1, Math.min(Number(process.env.WHATSAPP_MAX_RECIPIENTS || 100), 250));
+const MAX_AUTOMATION_RECIPIENTS_PER_BLAST = Math.max(
+  1,
+  Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 150), 500),
+);
 const MAX_SESSIONS = Math.max(1, Number(process.env.WHATSAPP_MAX_SESSIONS || 2));
 const MESSAGE_MAX_LENGTH = 4096;
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
@@ -630,13 +633,10 @@ app.post("/api/blast", async (req, res) => {
     if (!s.isReady) throw new Error("WhatsApp is not connected. Scan the QR code first.");
     if (!Array.isArray(recipients) || recipients.length === 0) throw new Error("Recipients list is required.");
 
-    const automationMax = Math.max(
-      MAX_RECIPIENTS_PER_BLAST,
-      Math.min(Number(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || 150), 500),
-    );
-    const maxRecipients = automation === true ? automationMax : MAX_RECIPIENTS_PER_BLAST;
-    if (recipients.length > maxRecipients) {
-      throw new Error(`This worker allows at most ${maxRecipients} recipients per campaign.`);
+    if (automation === true && recipients.length > MAX_AUTOMATION_RECIPIENTS_PER_BLAST) {
+      throw new Error(
+        `This worker allows at most ${MAX_AUTOMATION_RECIPIENTS_PER_BLAST} recipients per automation batch.`,
+      );
     }
 
     const seen = new Set();

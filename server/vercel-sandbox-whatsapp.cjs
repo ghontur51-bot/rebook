@@ -57,7 +57,6 @@ function workerEnv() {
     PUPPETEER_CACHE_DIR: path.posix.join(DATA_DIR, "puppeteer-cache"),
     WHATSAPP_MAX_SESSIONS: String(process.env.WHATSAPP_MAX_SESSIONS || "2"),
     WHATSAPP_DEFAULT_COUNTRY_CODE: String(process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91"),
-    WHATSAPP_MAX_RECIPIENTS: String(process.env.WHATSAPP_MAX_RECIPIENTS || "100"),
     WHATSAPP_MAX_AUTOMATION_RECIPIENTS: String(process.env.WHATSAPP_MAX_AUTOMATION_RECIPIENTS || "150"),
     AUTOMATION_CALLBACK_SECRET: deriveInternalSecret("rebook-automation-callback"),
     NODE_ENV: "production",
