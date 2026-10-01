@@ -640,21 +640,50 @@ app.post("/api/blast", async (req, res) => {
     }
 
     const seen = new Set();
-    const queue = recipients.map((recipient, index) => {
-      const phone = normalizePhone(recipient?.phone);
-      if (seen.has(phone)) throw new Error(`Duplicate recipient detected: ${phone}.`);
+    const queue = [];
+    let skippedInvalidPhoneCount = 0;
+    let skippedDuplicateCount = 0;
+
+    for (let index = 0; index < recipients.length; index += 1) {
+      const recipient = recipients[index];
+
+      let phone;
+      try {
+        phone = normalizePhone(recipient?.phone);
+      } catch (error) {
+        skippedInvalidPhoneCount += 1;
+        console.warn(
+          `Skipping WhatsApp recipient with invalid phone: ${String(recipient?.name || recipient?.id || index)}`,
+          error.message,
+        );
+        continue;
+      }
+
+      if (seen.has(phone)) {
+        skippedDuplicateCount += 1;
+        console.warn(`Skipping duplicate WhatsApp recipient: ${phone}`);
+        continue;
+      }
+
       seen.add(phone);
-      return {
+
+      if (s.suppressedNumbers.has(phone)) continue;
+
+      queue.push({
         id: recipient?.id ?? index,
         name: String(recipient?.name || "Customer"),
         phone,
         message: String(recipient?.message || message || ""),
         status: "pending",
         error: null,
-      };
-    }).filter((recipient) => !s.suppressedNumbers.has(recipient.phone));
+      });
+    }
 
-    if (!queue.length) throw new Error("No eligible recipients remain after WhatsApp opt-out filtering.");
+    if (!queue.length) {
+      throw new Error("No valid recipients with usable phone numbers are available for this campaign.");
+    }
+
+    const skippedRecipientCount = skippedInvalidPhoneCount + skippedDuplicateCount;
 
     const blast = {
       isRunning: true,
@@ -684,10 +713,20 @@ app.post("/api/blast", async (req, res) => {
         total: queue.length,
         queued: true,
         queuePosition: s.pendingBlasts.length,
+        skippedRecipientCount,
+        skippedInvalidPhoneCount,
+        skippedDuplicateCount,
       });
     }
 
-    res.json({ success: true, total: queue.length, queued: false });
+    res.json({
+      success: true,
+      total: queue.length,
+      queued: false,
+      skippedRecipientCount,
+      skippedInvalidPhoneCount,
+      skippedDuplicateCount,
+    });
     void executeBlast(shopId, s, blast);
   } catch (error) {
     res.status(400).json({ error: error.message || "Unable to start campaign." });
