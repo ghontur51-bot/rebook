@@ -87,6 +87,7 @@ function readWorkerSource() {
 // Every request just asks "is it ready yet, and if so, please make sure it's running" —
 // none of them wait on the install itself.
 const BOOTSTRAP_LOCK = path.posix.join(DATA_DIR, ".bootstrap.lock");
+const BOOTSTRAP_LOCK_DIR = path.posix.join(DATA_DIR, ".bootstrap.lock.d");
 const BOOTSTRAP_DONE = path.posix.join(DATA_DIR, ".bootstrap.done");
 const BOOTSTRAP_SCRIPT_PATH = path.posix.join(WORKER_DIR, "bootstrap.sh");
 
@@ -96,11 +97,13 @@ set -u
 cd "${WORKER_DIR}" || exit 1
 mkdir -p "${DATA_DIR}"
 
-if [ -f "${BOOTSTRAP_LOCK}" ]; then
+if ! mkdir "${BOOTSTRAP_LOCK_DIR}" 2>/dev/null; then
   exit 0
 fi
-touch "${BOOTSTRAP_LOCK}"
-trap 'rm -f "${BOOTSTRAP_LOCK}"' EXIT
+printf '%s %s\n' "$" "$(date +%s)" > "${BOOTSTRAP_LOCK_DIR}/owner"
+trap 'rm -rf "${BOOTSTRAP_LOCK_DIR}"' EXIT
+
+echo "Bootstrap started: $(date -Is) node=$(node -v) npm=$(npm -v)"
 
 if [ ! -f "${BOOTSTRAP_DONE}" ]; then
   if ! (ldconfig -p 2>/dev/null | grep -q 'libnss3.so' && ldconfig -p 2>/dev/null | grep -q 'libatk-1.0.so' && ldconfig -p 2>/dev/null | grep -q 'libgtk-3.so'); then
@@ -115,15 +118,16 @@ if [ ! -f "${BOOTSTRAP_DONE}" ]; then
       >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
   fi
 
-  if [ ! -f node_modules/whatsapp-web.js/package.json ]; then
-    npm install --omit=dev --no-audit --no-fund >>/tmp/rebook-wa-install.log 2>&1 || exit 1
-  fi
+  rm -rf node_modules
+
+  npm install --omit=dev --no-audit --no-fund --package-lock=false >>/tmp/rebook-wa-install.log 2>&1 || exit 1
 
   touch "${BOOTSTRAP_DONE}"
 fi
 
-rm -f "${BOOTSTRAP_LOCK}"
+rm -rf "${BOOTSTRAP_LOCK_DIR}"
 trap - EXIT
+echo "Bootstrap install/start phase finished: $(date -Is)"
 
 if ! node -e "fetch('http://127.0.0.1:${WORKER_PORT}/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
   pkill -f "node index.cjs" >/dev/null 2>&1 || true
