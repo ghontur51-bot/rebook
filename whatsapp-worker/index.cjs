@@ -831,8 +831,13 @@ app.listen(PORT, async () => {
       String(process.env.REBOOK_WORKER_VERSION || "unknown") + "\n",
       "utf8",
     );
+    fs.writeFileSync(
+      path.join(DATA_DIR, ".worker-source-hash"),
+      String(process.env.REBOOK_WORKER_SOURCE_HASH || "unknown") + "\n",
+      "utf8",
+    );
   } catch (error) {
-    console.warn("Unable to write WhatsApp worker runtime version:", error.message);
+    console.warn("Unable to write WhatsApp worker runtime marker:", error.message);
   }
   console.log(`ReBook WhatsApp worker listening on port ${PORT}`);
   console.log(`Max concurrent WhatsApp sessions: ${MAX_SESSIONS}`);
