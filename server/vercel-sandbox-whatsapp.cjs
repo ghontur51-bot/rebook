@@ -267,16 +267,27 @@ async function createOrResumeSandbox(shopId) {
   });
 }
 
-async function getWhatsAppSandbox(shopId) {
+async function getWhatsAppSandbox(shopId, { createIfMissing = true } = {}) {
   const key = String(shopId || "").trim();
-  if (!sandboxPromises.has(key)) {
+  const cacheKey = `${createIfMissing ? "create" : "read"}:${key}`;
+
+  if (!createIfMissing) {
+    const sdk = await getSandboxSdk();
+    const auth = sandboxAuthOptions();
+    return sdk.Sandbox.get({
+      name: safeSandboxName(key),
+      ...auth,
+    });
+  }
+
+  if (!sandboxPromises.has(cacheKey)) {
     const promise = createOrResumeSandbox(key).catch((error) => {
-      sandboxPromises.delete(key);
+      sandboxPromises.delete(cacheKey);
       throw error;
     });
-    sandboxPromises.set(key, promise);
+    sandboxPromises.set(cacheKey, promise);
   }
-  return sandboxPromises.get(key);
+  return sandboxPromises.get(cacheKey);
 }
 
 function isSandboxPortNotListeningError(error) {
@@ -310,7 +321,7 @@ function extractShopId(pathname, options = {}) {
 }
 
 async function getWorkerBaseUrl(shopId, { provision = true } = {}) {
-  const sandbox = await getWhatsAppSandbox(shopId);
+  const sandbox = await getWhatsAppSandbox(shopId, { createIfMissing: provision });
   // Any command resumes a stopped persistent Sandbox and runs the onResume hook.
   await sandbox.runCommand("true", []);
 
