@@ -10,7 +10,7 @@ const SANDBOX_SNAPSHOT_TTL_MS = Number(process.env.REBOOK_SANDBOX_SNAPSHOT_TTL_M
 const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
-const WORKER_VERSION = "2026-09-27-sandbox-v5";
+const WORKER_VERSION = "2026-10-01-signal-timeout-recovery-v1";
 function deriveInternalSecret(label) {
   const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
   if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
