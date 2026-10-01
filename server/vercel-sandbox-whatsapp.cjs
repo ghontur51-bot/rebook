@@ -309,13 +309,17 @@ function extractShopId(pathname, options = {}) {
   throw new Error("WhatsApp Sandbox shopId is required.");
 }
 
-async function getWorkerBaseUrl(shopId) {
+async function getWorkerBaseUrl(shopId, { provision = true } = {}) {
   const sandbox = await getWhatsAppSandbox(shopId);
   // Any command resumes a stopped persistent Sandbox and runs the onResume hook.
   await sandbox.runCommand("true", []);
 
   // Do not request sandbox.domain(5001) until the worker is actually listening.
   if (!(await isWorkerHealthy(sandbox))) {
+    if (!provision) {
+      return null;
+    }
+
     await sandbox.runCommand({ cmd: "mkdir", args: ["-p", WORKER_DIR, DATA_DIR] });
     await restartStaleWorkerIfNeeded(sandbox);
     await writeWorkerFiles(sandbox);
@@ -332,7 +336,8 @@ async function sandboxWorkerFetch(pathname, options = {}) {
 
   try {
     const shopId = extractShopId(pathname, options);
-    const baseUrl = await getWorkerBaseUrl(shopId);
+    const isStatusRequest = pathname.startsWith("/api/status");
+    const baseUrl = await getWorkerBaseUrl(shopId, { provision: !isStatusRequest });
     if (!baseUrl) {
       const isStatusOrConnect = pathname.startsWith("/api/status") || pathname.startsWith("/api/connect");
       if (isStatusOrConnect) {
