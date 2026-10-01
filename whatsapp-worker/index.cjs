@@ -115,8 +115,6 @@ function getSession(shopId) {
       pendingBlasts: [],
       initializationPromise: null,
       initializationGeneration: 0,
-      initializationRetryCount: 0,
-      initializationRetryTimer: null,
     });
   }
   return sessions.get(id);
@@ -305,11 +303,6 @@ async function initializeSession(shopId) {
       s.qrDataUrl = null;
       s.initializationError = null;
       s.loadingPercent = 100;
-      s.initializationRetryCount = 0;
-      if (s.initializationRetryTimer) {
-        clearTimeout(s.initializationRetryTimer);
-        s.initializationRetryTimer = null;
-      }
       s.clientInfo = client.info ? {
         name: client.info.pushname || "WhatsApp",
         phone: client.info.wid?.user || "",
@@ -367,16 +360,9 @@ async function initializeSession(shopId) {
     await initializeWithTimeout;
   })().catch(async (error) => {
     if (!isCurrentInitialization()) return;
-
-    const message = String(error?.message || error || "Unable to initialize WhatsApp.");
-    const transientTimeout = /signal timed out|timed out|timeout/i.test(message);
-    const canAutoRetry = transientTimeout && s.initializationRetryCount < 3;
-
     s.isReady = false;
-    s.connectionState = canAutoRetry ? "RETRYING" : "ERROR";
-    s.initializationError = canAutoRetry
-      ? "WhatsApp startup timed out. Retrying the connection automatically..."
-      : message;
+    s.connectionState = "ERROR";
+    s.initializationError = error.message || "Unable to initialize WhatsApp.";
     s.clientInfo = null;
     s.qrDataUrl = null;
     console.error(`WhatsApp initialization failed: ${shopId}`, error);
@@ -384,18 +370,6 @@ async function initializeSession(shopId) {
     if (s.client) {
       try { await s.client.destroy(); } catch {}
       s.client = null;
-    }
-
-    if (canAutoRetry) {
-      s.initializationRetryCount += 1;
-      cleanupChromiumSingletonLocks(path.join(SESSION_DIR, `session-${shopId}`));
-      const retryNumber = s.initializationRetryCount;
-      if (s.initializationRetryTimer) clearTimeout(s.initializationRetryTimer);
-      s.initializationRetryTimer = setTimeout(() => {
-        s.initializationRetryTimer = null;
-        if (sessions.get(shopId) !== s || s.client || s.initializationPromise || retryNumber !== s.initializationRetryCount) return;
-        void initializeSession(shopId);
-      }, 5000);
     }
   }).finally(() => {
     if (isCurrentInitialization()) {
