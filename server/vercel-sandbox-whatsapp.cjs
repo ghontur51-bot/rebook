@@ -10,7 +10,7 @@ const SANDBOX_SNAPSHOT_TTL_MS = Number(process.env.REBOOK_SANDBOX_SNAPSHOT_TTL_M
 const WORKER_DIR = "/vercel/sandbox/rebook-whatsapp-worker";
 const DATA_DIR = "/vercel/sandbox/rebook-whatsapp-data";
 const WORKER_PORT = 5001;
-const WORKER_VERSION = "2026-10-02-sandbox-v6";
+const WORKER_VERSION = "2026-10-02-sandbox-v7";
 function deriveInternalSecret(label) {
   const seed = String(process.env.MASTER_ENCRYPTION_KEY || process.env.ADMIN_SESSION_SECRET || "").trim();
   if (!seed) throw new Error("MASTER_ENCRYPTION_KEY is not configured.");
@@ -113,15 +113,51 @@ echo "Bootstrap started: $(date -Is) node=$(node -v) npm=$(npm -v)"
 
 if [ ! -f "${BOOTSTRAP_DONE}" ]; then
   if ! (ldconfig -p 2>/dev/null | grep -q 'libnss3.so' && ldconfig -p 2>/dev/null | grep -q 'libatk-1.0.so' && ldconfig -p 2>/dev/null | grep -q 'libgtk-3.so'); then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
-    apt-get install -y --no-install-recommends \\
-      ca-certificates fonts-liberation libasound2t64 libatk-bridge2.0-0 libatk1.0-0 \\
-      libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libgbm1 \\
-      libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \\
-      libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \\
-      libxi6 libxkbcommon0 libxrandr2 libxrender1 libxss1 libxtst6 \\
-      >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+    if command -v dnf >/dev/null 2>&1; then
+      dnf install -y \
+        ca-certificates \
+        liberation-fonts \
+        alsa-lib \
+        atk \
+        at-spi2-atk \
+        cairo \
+        cups-libs \
+        dbus-libs \
+        expat \
+        fontconfig \
+        freetype \
+        glib2 \
+        gtk3 \
+        libdrm \
+        libX11 \
+        libXcomposite \
+        libXdamage \
+        libXext \
+        libXfixes \
+        libXi \
+        libXrandr \
+        libXrender \
+        libXScrnSaver \
+        libXtst \
+        mesa-libgbm \
+        nspr \
+        nss \
+        pango \
+        >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+    elif command -v apt-get >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+      apt-get install -y --no-install-recommends \
+        ca-certificates fonts-liberation libasound2t64 libatk-bridge2.0-0 libatk1.0-0 \
+        libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 libfontconfig1 libgbm1 \
+        libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
+        libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+        libxi6 libxkbcommon0 libxrandr2 libxrender1 libxss1 libxtst6 \
+        >>/tmp/rebook-wa-deps.log 2>&1 || exit 1
+    else
+      echo "No supported package manager found; cannot install Chromium dependencies." >>/tmp/rebook-wa-deps.log
+      exit 1
+    fi
   fi
 
   rm -rf node_modules
