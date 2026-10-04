@@ -220,6 +220,7 @@ export default function Customers({
       )}
 
       <div
+        className="customers-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -255,6 +256,7 @@ export default function Customers({
 
       {/* Filters */}
       <div
+        className="customers-filters"
         style={{
           display: "flex",
           gap: 12,
