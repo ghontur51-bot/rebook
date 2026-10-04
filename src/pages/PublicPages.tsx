@@ -5,8 +5,8 @@ const linkStyle: React.CSSProperties = { color: "inherit", textDecoration: "none
 
 function Footer() {
   return (
-    <footer style={{ borderTop: "1px solid #e2e8f0", background: "#fff" }}>
-      <div style={{ maxWidth: 1120, margin: "0 auto", padding: "28px 24px", display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr", gap: 28 }}>
+    <footer className="public-footer" style={{ borderTop: "1px solid #e2e8f0", background: "#fff" }}>
+      <div className="public-footer-grid" style={{ maxWidth: 1120, margin: "0 auto", padding: "28px 24px", display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr", gap: 28 }}>
         <div>
           <div style={{ fontWeight: 900, fontSize: 18 }}>ReBook</div>
           <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: 13, lineHeight: 1.7 }}>{siteConfig.description}</p>
@@ -38,9 +38,9 @@ function Footer() {
 
 function Layout({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
+    <div className="public-shell" style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
       <header style={{ borderBottom: "1px solid #e2e8f0", background: "#fff" }}>
-        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18 }}>
+        <div className="public-header-inner" style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18 }}>
           <a href="/" style={{ ...linkStyle, fontWeight: 900, fontSize: 20 }}>ReBook</a>
           <nav style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "#475569" }}>
             <a href="/demo" style={{ ...linkStyle, fontWeight: 800 }}>Live Demo</a>
@@ -52,7 +52,7 @@ function Layout({ title, children }: { title: string; children: React.ReactNode 
           </nav>
         </div>
       </header>
-      <main style={{ maxWidth: 920, margin: "0 auto", padding: "56px 24px 72px" }}>
+      <main className="public-main" style={{ maxWidth: 920, margin: "0 auto", padding: "56px 24px 72px" }}>
         <div style={{ fontSize: 12, color: "#0f766e", fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2 }}>ReBook · {title}</div>
         <h1 style={{ fontSize: 42, lineHeight: 1.08, margin: "12px 0 20px", letterSpacing: -1.5 }}>{title}</h1>
         {children}
@@ -86,7 +86,7 @@ export function PublicHome() {
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", color: "#0f172a" }}>
       <header style={{ background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
-        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20 }}>
+        <div className="public-header-inner" style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 20 }}>
           <a href="/" style={{ ...linkStyle, fontSize: 21, fontWeight: 900 }}>ReBook</a>
           <nav style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13, color: "#475569" }}>
             <a href="/pricing" style={linkStyle}>Pricing</a>
@@ -97,7 +97,7 @@ export function PublicHome() {
         </div>
       </header>
 
-      <section style={{ maxWidth: 1120, margin: "0 auto", padding: "84px 24px 60px", display: "grid", gridTemplateColumns: "1.15fr .85fr", gap: 42, alignItems: "center" }}>
+      <section className="public-hero" style={{ maxWidth: 1120, margin: "0 auto", padding: "84px 24px 60px", display: "grid", gridTemplateColumns: "1.15fr .85fr", gap: 42, alignItems: "center" }}>
         <div>
           <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, background: "#ccfbf1", color: "#115e59", fontSize: 12, fontWeight: 800 }}>Salon operations + retention SaaS</div>
           <h1 style={{ fontSize: 64, lineHeight: 1.02, letterSpacing: -2.5, margin: "18px 0 18px" }}>Run the salon. Build the relationship.</h1>
@@ -121,10 +121,10 @@ export function PublicHome() {
       </section>
 
       <section style={{ background: "#fff", borderTop: "1px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
-        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "60px 24px" }}>
+        <div className="public-feature-inner" style={{ maxWidth: 1120, margin: "0 auto", padding: "60px 24px" }}>
           <div style={{ fontSize: 13, color: "#0f766e", fontWeight: 800 }}>A SaaS workflow, not a one-off website</div>
           <h2 style={{ fontSize: 34, margin: "10px 0 28px" }}>Everything in one operational workspace.</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          <div className="public-feature-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
             {[
               ["Customers", "Keep customer history, visits, spend and phone identity organized."],
               ["Bookings", "Manage walk-ins, appointments, staff schedules and booking checks."],
