@@ -179,7 +179,7 @@ export default function Bookings() {
   const statusMap: Record<string, string> = { confirmed: "badge-green", pending: "badge-amber", cancelled: "badge-red", completed: "badge-blue" };
 
   return (
-    <div style={{ padding: "32px" }}>
+    <div className="bookings-page" style={{ padding: "32px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "-0.02em", margin: 0 }}>Bookings</h1>
@@ -189,7 +189,7 @@ export default function Bookings() {
       </div>
 
       {/* Quick Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="bookings-stats" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         {[
           { label: "Today", value: bookings.filter(b => b.date === todayStr).length, icon: "📅", color: "#0D9488" },
           { label: "Tomorrow", value: bookings.filter(b => b.date === tomorrowStr).length, icon: "⏰", color: "#8B5CF6" },
@@ -209,7 +209,7 @@ export default function Bookings() {
       </div>
 
       {/* Filter */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+      <div className="bookings-filter" style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         {["all", "confirmed", "pending", "completed", "cancelled"].map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{
             padding: "7px 14px", borderRadius: 8, border: "1px solid",
@@ -228,15 +228,15 @@ export default function Bookings() {
         const isToday = date === todayStr;
         const dateLabel = isToday ? "Today" : new Date(date).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
         return (
-          <div key={date} style={{ marginBottom: 24 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <div key={date} className="booking-day" style={{ marginBottom: 24 }}>
+            <div className="booking-day-header" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: isToday ? "var(--primary)" : "var(--foreground)" }}>{dateLabel}</div>
               {isToday && <span className="badge badge-green" style={{ fontSize: 11 }}>Today</span>}
               <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
               <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>{dayBookings.length} bookings</div>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="booking-list" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {dayBookings
                 .sort((a, b) => {
                   const timeDiff = timeToMinutes(b.time) - timeToMinutes(a.time);
@@ -246,12 +246,12 @@ export default function Bookings() {
                   return Number(b.id) - Number(a.id);
                 })
                 .map(booking => (
-                <div key={booking.id} style={{ background: "#fff", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
-                  <div style={{ flexShrink: 0, textAlign: "center", width: 56 }}>
+                <div key={booking.id} className="booking-item" style={{ background: "#fff", borderRadius: "var(--radius)", border: "1px solid var(--border)", padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 }}>
+                  <div className="booking-time" style={{ flexShrink: 0, textAlign: "center", width: 56 }}>
                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 15, color: "var(--primary)" }}>{formatTime(booking.time)}</div>
                   </div>
                   <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="booking-details" style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{booking.customer}</div>
                       {(() => {
@@ -265,10 +265,10 @@ export default function Bookings() {
                     </div>
                     <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>{booking.service} · {booking.staff}</div>
                   </div>
-                  <div style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", fontSize: 15 }}>₹{booking.amount.toLocaleString()}</div>
-                  <span className={`badge ${statusMap[booking.status] || "badge-gray"}`} style={{ textTransform: "capitalize" }}>{booking.status}</span>
+                  <div className="booking-amount" style={{ fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", fontSize: 15 }}>₹{booking.amount.toLocaleString()}</div>
+                  <span className={`badge ${statusMap[booking.status] || "badge-gray"} booking-status`} style={{ textTransform: "capitalize" }}>{booking.status}</span>
                   {booking.bookingType !== "walk-in" && (
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div className="booking-actions" style={{ display: "flex", gap: 6 }}>
                       {booking.status === "pending" && (
                         <button className="btn-primary" style={{ fontSize: 12, padding: "5px 10px" }} onClick={() => updateBookingStatus(booking.id, "confirmed")}>Confirm</button>
                       )}
