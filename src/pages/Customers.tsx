@@ -186,7 +186,7 @@ export default function Customers({
   };
 
   return (
-    <div style={{ padding: "32px" }}>
+    <div className="customers-page" style={{ padding: "32px" }}>
       <input
         type="file"
         ref={fileInputRef}
@@ -220,6 +220,7 @@ export default function Customers({
       )}
 
       <div
+        className="customers-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -255,6 +256,7 @@ export default function Customers({
 
       {/* Filters */}
       <div
+        className="customers-filters"
         style={{
           display: "flex",
           gap: 12,
@@ -321,6 +323,7 @@ export default function Customers({
 
       {/* Table */}
       <div
+        className="customers-table-wrap"
         style={{
           background: "#fff",
           borderRadius: "var(--radius)",
@@ -459,6 +462,69 @@ export default function Customers({
           <div style={{ padding: "48px", textAlign: "center", color: "var(--muted-foreground)" }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
             <div style={{ fontWeight: 600, fontSize: 15 }}>No customers found</div>
+            <div style={{ fontSize: 13, marginTop: 4 }}>Try adjusting your search or filters</div>
+          </div>
+        )}
+      </div>
+
+      <div className="customers-mobile-list">
+        {filtered.map((c) => (
+          <div
+            key={c.id}
+            className="customer-mobile-card"
+            onClick={() => onNavigate("customer-profile", c.id)}
+          >
+            <div className="customer-mobile-main">
+              <div
+                className="customer-mobile-avatar"
+                style={{
+                  background:
+                    c.status === "active" ? "#DCFCE7" : c.status === "won_back" ? "#DBEAFE" : "#FEF3C7",
+                  color:
+                    c.status === "active" ? "#15803D" : c.status === "won_back" ? "#1D4ED8" : "#D97706",
+                }}
+              >
+                {c.avatar}
+              </div>
+              <div className="customer-mobile-identity">
+                <div className="customer-mobile-name-row">
+                  <div className="customer-mobile-name">{c.name}</div>
+                  <span className={"badge " + (isRepeatCustomer(c, bookings) ? "badge-blue" : "badge-gray")}>
+                    {isRepeatCustomer(c, bookings) ? "Repeat" : "New"}
+                  </span>
+                </div>
+                <div className="customer-mobile-phone">{c.phone}</div>
+                <div className="customer-mobile-service">{c.favouriteService}</div>
+              </div>
+              <div className="customer-mobile-arrow">›</div>
+            </div>
+
+            <div className="customer-mobile-meta">
+              <div className="customer-mobile-meta-item">
+                <span className="customer-mobile-meta-label">Last visit</span>
+                <strong>{new Date(c.lastVisit).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</strong>
+                <span className={c.status === "inactive" ? "customer-mobile-age warning" : "customer-mobile-age"}>{daysSince(c.lastVisit)}d ago</span>
+              </div>
+              <div className="customer-mobile-meta-item">
+                <span className="customer-mobile-meta-label">Visits</span>
+                <strong>{c.totalVisits}</strong>
+              </div>
+              <div className="customer-mobile-meta-item">
+                <span className="customer-mobile-meta-label">Spend</span>
+                <strong>₹{c.totalSpend.toLocaleString()}</strong>
+              </div>
+              <div className="customer-mobile-meta-item customer-mobile-status">
+                <span className="customer-mobile-meta-label">Status</span>
+                <StatusBadge status={c.status} />
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {filtered.length === 0 && (
+          <div className="customer-mobile-empty">
+            <div style={{ fontSize: 30, marginBottom: 8 }}>🔍</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>No customers found</div>
             <div style={{ fontSize: 13, marginTop: 4 }}>Try adjusting your search or filters</div>
           </div>
         )}

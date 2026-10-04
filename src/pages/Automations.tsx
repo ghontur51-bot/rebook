@@ -174,7 +174,7 @@ export default function Automations() {
         : "Not run yet";
 
   return (
-    <div style={{ padding: "32px" }}>
+    <div className="automations-page" style={{ padding: "32px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, gap: 16, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "-0.02em", margin: 0 }}>
@@ -250,7 +250,7 @@ export default function Automations() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="automation-stats" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
         {[
           { label: "Total Triggered", value: automations.reduce((s, a) => s + a.triggered, 0), icon: "⚡", color: "#F59E0B" },
           { label: "Total Converted", value: automations.reduce((s, a) => s + a.converted, 0), icon: "🎯", color: "#10B981" },
