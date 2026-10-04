@@ -1101,7 +1101,7 @@ export default function Campaigns() {
   };
 
   return (
-    <div style={{ padding: "32px" }}>
+    <div className="campaigns-page" style={{ padding: "32px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "-0.02em", margin: 0 }}>Campaigns</h1>
@@ -1126,7 +1126,7 @@ export default function Campaigns() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="campaign-stats" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         {[
           { label: "Messages Submitted", value: campaigns.reduce((s, c) => s + c.sent, 0).toLocaleString(), icon: "📤" },
           { label: "WhatsApp Customers", value: customers.filter((c) => String(c.phone || "").trim()).length.toLocaleString(), icon: "📱" },
