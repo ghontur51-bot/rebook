@@ -180,7 +180,7 @@ export default function Bookings() {
 
   return (
     <div className="bookings-page" style={{ padding: "32px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="bookings-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", letterSpacing: "-0.02em", margin: 0 }}>Bookings</h1>
           <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 2 }}>Manage upcoming and past appointments</div>
