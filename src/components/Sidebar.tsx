@@ -23,7 +23,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       {/* Logo */}
-      <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="sidebar-brand" style={{ padding: "24px 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{
             width: 36, height: 36, background: "var(--primary)", borderRadius: 10,
@@ -38,7 +38,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <nav style={{ flex: 1, padding: "12px 0" }}>
+      <nav className="sidebar-nav" style={{ flex: 1, padding: "12px 0" }}>
         <div style={{ padding: "6px 16px 8px", fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "0.08em" }} className="sidebar-label">
           Main Menu
         </div>
@@ -55,7 +55,7 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       </nav>
 
       {/* Bottom */}
-      <div style={{ padding: "16px 12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="sidebar-footer" style={{ padding: "16px 12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px", borderRadius: 8, cursor: "pointer" }}
           className="sidebar-nav-item" onClick={() => onNavigate("settings")}>
           <div style={{
