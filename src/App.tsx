@@ -42,16 +42,18 @@ function AppContent() {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--background)" }}>
       <Sidebar currentPage={page} onNavigate={(p) => navigateTo(p as Page)} />
-      <main style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
-        {page === "dashboard" && <Dashboard onNavigate={navigateTo} customers={customers} />}
-        {page === "customers" && <Customers onNavigate={navigateTo} customers={customers} onAddCustomer={addCustomer} />}
-        {page === "customer-profile" && selectedCustomer && <CustomerProfile key={selectedCustomer.id} customer={selectedCustomer} onBack={() => navigateTo("customers")} />}
-        {page === "automations" && <Automations />}
-        {page === "campaigns" && <Campaigns />}
-        {page === "bookings" && <Bookings />}
-        {page === "staff" && <Staff />}
-        {page === "analytics" && <Analytics />}
-        {page === "settings" && <Settings />}
+      <main className="main-content" style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
+        <div className="page-shell">
+          {page === "dashboard" && <Dashboard onNavigate={navigateTo} customers={customers} />}
+          {page === "customers" && <Customers onNavigate={navigateTo} customers={customers} onAddCustomer={addCustomer} />}
+          {page === "customer-profile" && selectedCustomer && <CustomerProfile key={selectedCustomer.id} customer={selectedCustomer} onBack={() => navigateTo("customers")} />}
+          {page === "automations" && <Automations />}
+          {page === "campaigns" && <Campaigns />}
+          {page === "bookings" && <Bookings />}
+          {page === "staff" && <Staff />}
+          {page === "analytics" && <Analytics />}
+          {page === "settings" && <Settings />}
+        </div>
       </main>
     </div>
   );
